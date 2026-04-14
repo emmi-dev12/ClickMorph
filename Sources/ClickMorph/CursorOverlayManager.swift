@@ -199,8 +199,10 @@ final class CursorOverlayManager: NSObject {
     private func enableBackgroundCursorOps() {
         typealias GetConn  = @convention(c) () -> UInt32
         typealias SetProp  = @convention(c) (UInt32, UInt32, CFString, CFTypeRef) -> Int32
-        guard let rawGet  = dlsym(RTLD_DEFAULT, "CGSMainConnectionID"),
-              let rawSet  = dlsym(RTLD_DEFAULT, "CGSSetConnectionProperty") else { return }
+        // RTLD_DEFAULT is (void*)-2 — Swift can't import the C pointer-cast macro directly.
+        let rtldDefault = UnsafeMutableRawPointer(bitPattern: -2)
+        guard let rawGet  = dlsym(rtldDefault, "CGSMainConnectionID"),
+              let rawSet  = dlsym(rtldDefault, "CGSSetConnectionProperty") else { return }
         let getConn = unsafeBitCast(rawGet, to: GetConn.self)
         let setProp = unsafeBitCast(rawSet, to: SetProp.self)
         let conn = getConn()
