@@ -3,7 +3,7 @@ BUNDLE    = $(APP).app
 BINARY    = .build/release/$(APP)
 CONTENTS  = $(BUNDLE)/Contents
 
-.PHONY: all build bundle run clean sign
+.PHONY: all build bundle run clean sign dmg
 
 ## Default: build then bundle
 all: bundle
@@ -29,7 +29,17 @@ sign: bundle
 run: sign
 	open $(BUNDLE)
 
+## Package a drag-to-install DMG
+dmg: sign
+	@rm -rf ClickMorph.dmg _dmg_staging
+	@mkdir _dmg_staging
+	@cp -r $(BUNDLE) _dmg_staging/
+	@ln -s /Applications _dmg_staging/Applications
+	hdiutil create -volname "ClickMorph" -srcfolder _dmg_staging -ov -format UDZO ClickMorph.dmg
+	@rm -rf _dmg_staging
+	@echo "Created ClickMorph.dmg — drag to /Applications to install"
+
 ## Remove build artefacts and the app bundle
 clean:
 	swift package clean
-	@rm -rf $(BUNDLE)
+	@rm -rf $(BUNDLE) ClickMorph.dmg
