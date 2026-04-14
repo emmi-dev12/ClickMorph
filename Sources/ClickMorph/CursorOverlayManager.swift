@@ -71,12 +71,8 @@ final class CursorOverlayManager: NSObject {
 
     // MARK: - Cursor appearance pass-through
 
-    func setCursorDiameter(_ d: CGFloat) {
-        cursorView.cursorDiameter = d
-    }
-
-    func setCursorColor(_ color: NSColor) {
-        cursorView.cursorNSColor = color
+    func setCursorScale(_ scale: CGFloat) {
+        cursorView.displayScale = scale
     }
 
     // MARK: - Monitor wiring
@@ -164,7 +160,7 @@ final class CursorOverlayManager: NSObject {
 
         // Convert global AppKit point → window-local point → view coordinate
         let windowPoint = targetWindow.convertPoint(fromScreen: nsGlobalPoint)
-        cursorView.moveCenter(to: windowPoint)
+        cursorView.moveHotspot(to: windowPoint)
     }
 
     // MARK: - Cursor hiding

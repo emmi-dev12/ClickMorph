@@ -21,10 +21,7 @@ struct ClickMorphApp: App {
 final class AppState: ObservableObject {
     @Published var isEnabled: Bool = true
     @Published var selectedSize: CursorSize = .medium {
-        didSet { manager.setCursorDiameter(selectedSize.diameter) }
-    }
-    @Published var selectedColor: CursorColor = .white {
-        didSet { manager.setCursorColor(selectedColor.nsColor) }
+        didSet { manager.setCursorScale(selectedSize.scale) }
     }
 
     let manager = CursorOverlayManager()
@@ -48,33 +45,12 @@ enum CursorSize: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var diameter: CGFloat {
+    /// Multiplier applied to the system cursor's native size.
+    var scale: CGFloat {
         switch self {
-        case .small:  return 20
-        case .medium: return 28
-        case .large:  return 40
-        }
-    }
-}
-
-// MARK: - Cursor color options
-
-enum CursorColor: String, CaseIterable, Identifiable {
-    case white  = "White"
-    case yellow = "Yellow"
-    case coral  = "Coral"
-    case sky    = "Sky Blue"
-    case mint   = "Mint"
-
-    var id: String { rawValue }
-
-    var nsColor: NSColor {
-        switch self {
-        case .white:  return .white
-        case .yellow: return NSColor(red: 1.0,  green: 0.92, blue: 0.23, alpha: 1)
-        case .coral:  return NSColor(red: 1.0,  green: 0.45, blue: 0.40, alpha: 1)
-        case .sky:    return NSColor(red: 0.40, green: 0.80, blue: 1.0,  alpha: 1)
-        case .mint:   return NSColor(red: 0.40, green: 0.95, blue: 0.75, alpha: 1)
+        case .small:  return 1.3
+        case .medium: return 1.8
+        case .large:  return 2.5
         }
     }
 }
@@ -85,7 +61,6 @@ struct MenuBarContentView: View {
     @EnvironmentObject var appState: AppState
 
     var body: some View {
-        // Enable / Disable
         Button(appState.isEnabled ? "Disable ClickMorph" : "Enable ClickMorph") {
             appState.toggle()
         }
@@ -93,19 +68,9 @@ struct MenuBarContentView: View {
 
         Divider()
 
-        // Cursor size — Picker(.inline) renders native macOS radio checkmarks
-        Menu("Size") {
-            Picker("Size", selection: $appState.selectedSize) {
+        Menu("Cursor Size") {
+            Picker("Cursor Size", selection: $appState.selectedSize) {
                 ForEach(CursorSize.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.inline)
-            .labelsHidden()
-        }
-
-        // Cursor color
-        Menu("Color") {
-            Picker("Color", selection: $appState.selectedColor) {
-                ForEach(CursorColor.allCases) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.inline)
             .labelsHidden()
