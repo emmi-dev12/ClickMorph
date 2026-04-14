@@ -16,6 +16,9 @@ final class CursorView: NSView {
         didSet { rebuildLayers() }
     }
 
+    /// Whether to animate the cursor shrink/spring on click.
+    var showClickSwell: Bool = true
+
     /// Whether to show the expanding ripple ring on mouse-down.
     var showRipple: Bool = true
 
@@ -133,21 +136,22 @@ final class CursorView: NSView {
     /// Press: cursor shrinks to 60 % (scaling from the hot-spot tip) and,
     /// when enabled, a ripple ring expands outward from the same point.
     func animateMouseDown() {
-        let fromScale = cursorLayer.presentation()?
-            .value(forKeyPath: "transform.scale") as? CGFloat ?? 1.0
+        if showClickSwell {
+            let fromScale = cursorLayer.presentation()?
+                .value(forKeyPath: "transform.scale") as? CGFloat ?? 1.0
 
-        // Set model value first — animation is purely visual on top of it.
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        cursorLayer.setValue(0.6, forKeyPath: "transform.scale")
-        CATransaction.commit()
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            cursorLayer.setValue(0.6, forKeyPath: "transform.scale")
+            CATransaction.commit()
 
-        let shrink = CABasicAnimation(keyPath: "transform.scale")
-        shrink.fromValue = fromScale
-        shrink.toValue   = 0.6
-        shrink.duration  = 0.12
-        shrink.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        cursorLayer.add(shrink, forKey: "shrink")
+            let shrink = CABasicAnimation(keyPath: "transform.scale")
+            shrink.fromValue = fromScale
+            shrink.toValue   = 0.6
+            shrink.duration  = 0.12
+            shrink.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            cursorLayer.add(shrink, forKey: "shrink")
+        }
 
         guard showRipple else { return }
 
@@ -168,6 +172,8 @@ final class CursorView: NSView {
 
     /// Release: cursor springs back to full size with a natural overshoot.
     func animateMouseUp() {
+        guard showClickSwell else { return }
+
         let fromScale = cursorLayer.presentation()?
             .value(forKeyPath: "transform.scale") as? CGFloat ?? 0.6
 

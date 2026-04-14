@@ -26,6 +26,9 @@ final class AppState: ObservableObject {
     @Published var showRipple: Bool = true {
         didSet { manager.setRippleEnabled(showRipple) }
     }
+    @Published var showClickSwell: Bool = true {
+        didSet { manager.setClickSwellEnabled(showClickSwell) }
+    }
 
     let manager = CursorOverlayManager()
 
@@ -84,6 +87,7 @@ struct MenuBarContentView: View {
             .labelsHidden()
         }
 
+        Toggle("Click Swell", isOn: $appState.showClickSwell)
         Toggle("Click Ripple", isOn: $appState.showRipple)
 
         Divider()

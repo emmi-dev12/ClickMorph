@@ -83,6 +83,10 @@ final class CursorOverlayManager: NSObject {
         cursorView.showRipple = enabled
     }
 
+    func setClickSwellEnabled(_ enabled: Bool) {
+        cursorView.showClickSwell = enabled
+    }
+
     // MARK: - Monitor wiring
 
     private func wireMonitor() {
