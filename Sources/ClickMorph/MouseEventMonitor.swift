@@ -43,12 +43,13 @@ final class MouseEventMonitor {
 
     private func installTap() {
         let eventsOfInterest: CGEventMask =
-            (1 << CGEventType.mouseMoved.rawValue)       |
-            (1 << CGEventType.leftMouseDown.rawValue)    |
-            (1 << CGEventType.leftMouseUp.rawValue)      |
-            (1 << CGEventType.leftMouseDragged.rawValue) |
-            (1 << CGEventType.rightMouseDown.rawValue)   |
-            (1 << CGEventType.rightMouseUp.rawValue)
+            (1 << CGEventType.mouseMoved.rawValue)        |
+            (1 << CGEventType.leftMouseDown.rawValue)     |
+            (1 << CGEventType.leftMouseUp.rawValue)       |
+            (1 << CGEventType.leftMouseDragged.rawValue)  |
+            (1 << CGEventType.rightMouseDown.rawValue)    |
+            (1 << CGEventType.rightMouseUp.rawValue)      |
+            (1 << CGEventType.rightMouseDragged.rawValue)
 
         // Pass `self` as the userInfo pointer. Use passUnretained — the
         // CursorOverlayManager owns both the monitor and the tap lifetime,
@@ -94,7 +95,9 @@ final class MouseEventMonitor {
         }
         let monitor = Unmanaged<MouseEventMonitor>.fromOpaque(userInfo).takeUnretainedValue()
         monitor.dispatch(type: type, event: event)
-        return Unmanaged.passRetained(event)  // listen-only: always return event unchanged
+        // passUnretained: we do not take ownership; CoreGraphics owns the event lifetime.
+        // passRetained would over-retain and leak on every mouse event.
+        return Unmanaged.passUnretained(event)
     }
 
     private func dispatch(type: CGEventType, event: CGEvent) {
@@ -112,7 +115,7 @@ final class MouseEventMonitor {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             switch type {
-            case .mouseMoved, .leftMouseDragged:
+            case .mouseMoved, .leftMouseDragged, .rightMouseDragged:
                 self.onMouseMove?(location)
             case .leftMouseDown:
                 self.onMouseDown?(location)

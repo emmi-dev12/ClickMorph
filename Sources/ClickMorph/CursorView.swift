@@ -83,15 +83,26 @@ final class CursorView: NSView {
     // MARK: - Animations
 
     func animateMouseDown() {
-        // Shrink the dot to 60%
+        // Correct Core Animation pattern:
+        //   1. Commit the final model value immediately (disabled transaction — no implicit anim)
+        //   2. Add a purely visual animation from the current presentation value to the target
+        // This guarantees the model is always correct; the animation is just eye candy.
+        // isRemovedOnCompletion = true (default) means once the animation finishes, the layer
+        // naturally shows the model value — no stale frozen animation left behind.
+
+        let fromScale = cursorLayer.presentation()?.value(forKeyPath: "transform.scale") as? CGFloat ?? 1.0
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        cursorLayer.setValue(0.6, forKeyPath: "transform.scale")
+        CATransaction.commit()
+
         let shrink = CABasicAnimation(keyPath: "transform.scale")
+        shrink.fromValue = fromScale
         shrink.toValue = 0.6
         shrink.duration = 0.12
         shrink.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        shrink.fillMode = .forwards
-        shrink.isRemovedOnCompletion = false
         cursorLayer.add(shrink, forKey: "shrink")
-        cursorLayer.setValue(0.6, forKeyPath: "transform.scale")
 
         // Ripple: ring expands and fades out
         let rippleScale = CABasicAnimation(keyPath: "transform.scale")
@@ -108,23 +119,26 @@ final class CursorView: NSView {
         rippleGroup.animations = [rippleScale, rippleFade]
         rippleGroup.duration = 0.38
         rippleGroup.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        rippleGroup.isRemovedOnCompletion = true
         rippleLayer.add(rippleGroup, forKey: "ripple")
     }
 
     func animateMouseUp() {
-        // Spring back to full size with a natural overshoot
+        let fromScale = cursorLayer.presentation()?.value(forKeyPath: "transform.scale") as? CGFloat ?? 0.6
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        cursorLayer.setValue(1.0, forKeyPath: "transform.scale")
+        CATransaction.commit()
+
         let spring = CASpringAnimation(keyPath: "transform.scale")
-        spring.fromValue = cursorLayer.presentation()?.value(forKeyPath: "transform.scale") ?? 0.6
+        spring.fromValue = fromScale
         spring.toValue = 1.0
         spring.mass = 1.0
         spring.stiffness = 280
         spring.damping = 18
         spring.initialVelocity = 0
         spring.duration = spring.settlingDuration
-        spring.isRemovedOnCompletion = true
         cursorLayer.add(spring, forKey: "springBack")
-        cursorLayer.setValue(1.0, forKeyPath: "transform.scale")
     }
 
     // MARK: - Positioning
