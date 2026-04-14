@@ -19,9 +19,9 @@ build:
 icon:
 	@mkdir -p $(RESOURCES)
 	@echo "Generating icon…"
-	@swift scripts/make_icon.swift _iconset
-	@iconutil -c icns _iconset -o $(RESOURCES)/AppIcon.icns
-	@rm -rf _iconset
+	@swift scripts/make_icon.swift AppIcon.iconset
+	@iconutil -c icns AppIcon.iconset -o $(RESOURCES)/AppIcon.icns
+	@rm -rf AppIcon.iconset
 	@echo "Created $(RESOURCES)/AppIcon.icns"
 
 ## Wrap the binary in a proper .app bundle
