@@ -28,6 +28,7 @@ final class AppState: ObservableObject {
 
     init() {
         manager.start()
+        manager.setCursorScale(selectedSize.scale)
     }
 
     func toggle() {

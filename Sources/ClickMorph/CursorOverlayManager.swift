@@ -24,8 +24,7 @@ final class CursorOverlayManager: NSObject {
     private var hiddenDisplayIDs: Set<CGDirectDisplayID> = []
     private var reHideTimer: DispatchSourceTimer?
 
-    // Cursor shape tracking
-    private var shapeTimer: DispatchSourceTimer?
+    // Cursor shape tracking — updated in the mouse-move handler, not a timer
     private var lastSeenCursor: NSCursor? = nil
 
     // 1×1 fully transparent cursor — set on every mouse event so the system
@@ -60,13 +59,12 @@ final class CursorOverlayManager: NSObject {
         enableBackgroundCursorOps()
         hideCursor()
         monitor.start()
-        startShapeTimer()
     }
 
     func disable() {
         guard isEnabled else { return }
         isEnabled = false
-        stopShapeTimer()
+        lastSeenCursor = nil
         overlayWindows.values.forEach { $0.orderOut(nil) }
         showCursor()
         monitor.stop()
@@ -84,9 +82,14 @@ final class CursorOverlayManager: NSObject {
         monitor.onMouseMove = { [weak self] point in
             guard let self else { return }
             self.updateCursorPosition(point)
-            // Re-apply transparent cursor on every move so another app's cursor
-            // update never leaks through for more than one event cycle
-            if self.isEnabled { self.transparentCursor.set() }
+            if self.isEnabled {
+                // Snapshot the real cursor BEFORE we override it with transparent.
+                // By the time this async block runs, the app under the cursor has
+                // already processed the event (tracking area, cursor rects, etc.)
+                // and called NSCursor.set() — so currentSystem reflects their choice.
+                self.snapshotCursorShape()
+                self.transparentCursor.set()
+            }
         }
         monitor.onMouseDown = { [weak self] point in
             guard let self else { return }
@@ -165,29 +168,18 @@ final class CursorOverlayManager: NSObject {
 
     // MARK: - Cursor shape tracking
 
-    /// Polls NSCursor.currentSystem every 30 ms and updates the overlay image
-    /// whenever the cursor shape changes (arrow → i-beam → pointer hand, etc.)
-    private func startShapeTimer() {
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(30))
-        timer.setEventHandler { [weak self] in
-            guard let self else { return }
-            let current = NSCursor.currentSystem ?? .arrow
-            if current !== self.lastSeenCursor {
-                self.lastSeenCursor = current
-                self.cursorView.updateCursor(current)
-                // Re-hide immediately after a cursor change so there is no flash
-                self.transparentCursor.set()
-            }
+    /// Called from the mouse-move handler immediately before transparentCursor.set().
+    /// Reads NSCursor.currentSystem while it still reflects the real cursor that the
+    /// app under the cursor set; ignores our own 1×1 transparent cursor.
+    private func snapshotCursorShape() {
+        guard let cursor = NSCursor.currentSystem,
+              cursor.image.size.width > 2 else { return }   // skip our 1×1 transparent cursor
+        // Structural equality: same image size + same hot-spot = same visual shape.
+        if cursor.image.size != lastSeenCursor?.image.size ||
+           cursor.hotSpot    != lastSeenCursor?.hotSpot {
+            lastSeenCursor = cursor
+            cursorView.updateCursor(cursor)
         }
-        timer.resume()
-        shapeTimer = timer
-    }
-
-    private func stopShapeTimer() {
-        shapeTimer?.cancel()
-        shapeTimer = nil
-        lastSeenCursor = nil
     }
 
     // MARK: - Cursor hiding

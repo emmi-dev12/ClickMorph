@@ -19,7 +19,8 @@ final class CursorView: NSView {
     /// Replace the displayed cursor shape (arrow → i-beam → pointer, etc.).
     /// Rebuilds layers; the next moveHotspot call repositions correctly.
     func updateCursor(_ cursor: NSCursor) {
-        guard cursor !== currentCursor else { return }
+        guard cursor.image.size != currentCursor.image.size ||
+              cursor.hotSpot    != currentCursor.hotSpot    else { return }
         currentCursor = cursor
         rebuildLayers()
     }
