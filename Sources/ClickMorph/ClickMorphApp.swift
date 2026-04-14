@@ -20,8 +20,12 @@ struct ClickMorphApp: App {
 
 final class AppState: ObservableObject {
     @Published var isEnabled: Bool = true
-    @Published var selectedSize: CursorSize = .medium
-    @Published var selectedColor: CursorColor = .white
+    @Published var selectedSize: CursorSize = .medium {
+        didSet { manager.setCursorDiameter(selectedSize.diameter) }
+    }
+    @Published var selectedColor: CursorColor = .white {
+        didSet { manager.setCursorColor(selectedColor.nsColor) }
+    }
 
     let manager = CursorOverlayManager()
 
@@ -32,16 +36,6 @@ final class AppState: ObservableObject {
     func toggle() {
         isEnabled.toggle()
         isEnabled ? manager.enable() : manager.disable()
-    }
-
-    func applySize(_ size: CursorSize) {
-        selectedSize = size
-        manager.setCursorDiameter(size.diameter)
-    }
-
-    func applyColor(_ color: CursorColor) {
-        selectedColor = color
-        manager.setCursorColor(color.nsColor)
     }
 }
 
@@ -99,38 +93,22 @@ struct MenuBarContentView: View {
 
         Divider()
 
-        // Cursor size
+        // Cursor size — Picker(.inline) renders native macOS radio checkmarks
         Menu("Size") {
-            ForEach(CursorSize.allCases) { size in
-                Button {
-                    appState.applySize(size)
-                } label: {
-                    HStack {
-                        Text(size.rawValue)
-                        if appState.selectedSize == size {
-                            Spacer()
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
+            Picker("Size", selection: $appState.selectedSize) {
+                ForEach(CursorSize.allCases) { Text($0.rawValue).tag($0) }
             }
+            .pickerStyle(.inline)
+            .labelsHidden()
         }
 
         // Cursor color
         Menu("Color") {
-            ForEach(CursorColor.allCases) { color in
-                Button {
-                    appState.applyColor(color)
-                } label: {
-                    HStack {
-                        Text(color.rawValue)
-                        if appState.selectedColor == color {
-                            Spacer()
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
+            Picker("Color", selection: $appState.selectedColor) {
+                ForEach(CursorColor.allCases) { Text($0.rawValue).tag($0) }
             }
+            .pickerStyle(.inline)
+            .labelsHidden()
         }
 
         Divider()

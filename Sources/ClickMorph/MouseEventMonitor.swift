@@ -91,7 +91,7 @@ final class MouseEventMonitor {
 
     private static let tapCallback: CGEventTapCallBack = { proxy, type, event, userInfo in
         guard let userInfo = userInfo else {
-            return Unmanaged.passRetained(event)
+            return Unmanaged.passUnretained(event)
         }
         let monitor = Unmanaged<MouseEventMonitor>.fromOpaque(userInfo).takeUnretainedValue()
         monitor.dispatch(type: type, event: event)
@@ -101,10 +101,12 @@ final class MouseEventMonitor {
     }
 
     private func dispatch(type: CGEventType, event: CGEvent) {
-        // Re-enable the tap if macOS silently disabled it (timeout or permission revoke)
-        let disabledByTimeout = CGEventType(rawValue: UInt32(kCGEventTapDisabledByTimeout))
-        let disabledByUser    = CGEventType(rawValue: UInt32(kCGEventTapDisabledByUserInput))
-        if type == disabledByTimeout || type == disabledByUser {
+        // Re-enable the tap if macOS silently disabled it (timeout or permission revoke).
+        // Use raw hex values instead of kCGEventTapDisabledByTimeout/UserInput — those
+        // constants import as C int (potentially Int32) and UInt32(negativeInt32) traps.
+        //   0xFFFFFFFE = kCGEventTapDisabledByTimeout
+        //   0xFFFFFFFD = kCGEventTapDisabledByUserInput
+        if type.rawValue == 0xFFFFFFFE || type.rawValue == 0xFFFFFFFD {
             if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
             return
         }

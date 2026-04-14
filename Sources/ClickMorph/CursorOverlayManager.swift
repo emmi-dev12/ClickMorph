@@ -23,8 +23,10 @@ final class CursorOverlayManager: NSObject {
 
     private let monitor = MouseEventMonitor()
 
-    // Reference-counted cursor hiding — CGDisplayHideCursor is cumulative
+    // Reference-counted cursor hiding — CGDisplayHideCursor is cumulative per display
     private var cursorHideDepth = 0
+    // Track which display IDs we've hidden so screensChanged can hide only new ones
+    private var hiddenDisplayIDs: Set<CGDirectDisplayID> = []
 
     // MARK: - Public API
 
@@ -123,6 +125,12 @@ final class CursorOverlayManager: NSObject {
         buildWindows()
         if isEnabled {
             overlayWindows.values.forEach { $0.orderFront(nil) }
+            // A newly connected display was never passed to CGDisplayHideCursor.
+            // Hide only the new IDs to avoid incrementing the hide-depth counter
+            // on displays that are already hidden.
+            let current = Set(activeDisplayIDs())
+            current.subtracting(hiddenDisplayIDs).forEach { CGDisplayHideCursor($0) }
+            hiddenDisplayIDs = current
         }
     }
 
@@ -164,7 +172,9 @@ final class CursorOverlayManager: NSObject {
 
     private func hideCursor() {
         if cursorHideDepth == 0 {
-            activeDisplayIDs().forEach { CGDisplayHideCursor($0) }
+            let ids = activeDisplayIDs()
+            ids.forEach { CGDisplayHideCursor($0) }
+            hiddenDisplayIDs = Set(ids)
         }
         cursorHideDepth += 1
     }
@@ -173,7 +183,8 @@ final class CursorOverlayManager: NSObject {
         guard cursorHideDepth > 0 else { return }
         cursorHideDepth -= 1
         if cursorHideDepth == 0 {
-            activeDisplayIDs().forEach { CGDisplayShowCursor($0) }
+            hiddenDisplayIDs.forEach { CGDisplayShowCursor($0) }
+            hiddenDisplayIDs = []
         }
     }
 

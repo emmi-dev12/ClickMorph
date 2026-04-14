@@ -10,9 +10,9 @@ let package = Package(
         .executableTarget(
             name: "ClickMorph",
             path: "Sources/ClickMorph",
-            resources: [
-                .process("Resources")
-            ]
+            // Info.plist is copied into the .app bundle by the Makefile;
+            // SPM forbids it as a top-level resource, so exclude it here.
+            exclude: ["Resources/Info.plist"]
         )
     ]
 )
