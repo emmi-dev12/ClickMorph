@@ -1,8 +1,8 @@
 import AppKit
 import QuartzCore
 
-/// Renders the system arrow cursor image at a configurable scale, with a
-/// click-shrink + spring-back animation and an outward ripple ring on press.
+/// Renders the system cursor image at a configurable scale, with a
+/// click-shrink + spring-back animation and an optional outward ripple ring.
 ///
 /// Positioning is hot-spot based: `moveHotspot(to:)` places the cursor TIP
 /// (not the view centre) at the given window coordinate.
@@ -15,6 +15,9 @@ final class CursorView: NSView {
     var displayScale: CGFloat = 2.0 {
         didSet { rebuildLayers() }
     }
+
+    /// Whether to show the expanding ripple ring on mouse-down.
+    var showRipple: Bool = true
 
     /// Replace the displayed cursor shape (arrow → i-beam → pointer, etc.).
     /// Rebuilds layers; the next moveHotspot call repositions correctly.
@@ -109,15 +112,15 @@ final class CursorView: NSView {
 
         // ── Ripple layer ─────────────────────────────────────────────────────
         let rippleD: CGFloat = max(ss.width, ss.height) * 0.65
-        rippleLayer.bounds       = CGRect(x: 0, y: 0, width: rippleD, height: rippleD)
-        rippleLayer.position     = hotInView
-        rippleLayer.anchorPoint  = CGPoint(x: 0.5, y: 0.5)
-        rippleLayer.cornerRadius = rippleD / 2
+        rippleLayer.bounds          = CGRect(x: 0, y: 0, width: rippleD, height: rippleD)
+        rippleLayer.position        = hotInView
+        rippleLayer.anchorPoint     = CGPoint(x: 0.5, y: 0.5)
+        rippleLayer.cornerRadius    = rippleD / 2
         rippleLayer.backgroundColor = CGColor.clear
-        rippleLayer.borderColor  = NSColor.white.withAlphaComponent(0.75).cgColor
-        rippleLayer.borderWidth  = 2
-        rippleLayer.opacity      = 0
-        rippleLayer.masksToBounds = false
+        rippleLayer.borderColor     = NSColor.white.withAlphaComponent(0.75).cgColor
+        rippleLayer.borderWidth     = 2
+        rippleLayer.opacity         = 0
+        rippleLayer.masksToBounds   = false
 
         // Rebuild sublayers from scratch
         layer?.sublayers?.forEach { $0.removeFromSuperlayer() }
@@ -127,8 +130,8 @@ final class CursorView: NSView {
 
     // MARK: - Animations
 
-    /// Press: cursor shrinks to 60 % (scaling from the hot-spot tip) and a
-    /// ripple ring expands outward from the same point.
+    /// Press: cursor shrinks to 60 % (scaling from the hot-spot tip) and,
+    /// when enabled, a ripple ring expands outward from the same point.
     func animateMouseDown() {
         let fromScale = cursorLayer.presentation()?
             .value(forKeyPath: "transform.scale") as? CGFloat ?? 1.0
@@ -146,7 +149,8 @@ final class CursorView: NSView {
         shrink.timingFunction = CAMediaTimingFunction(name: .easeOut)
         cursorLayer.add(shrink, forKey: "shrink")
 
-        // Ripple
+        guard showRipple else { return }
+
         let expandScale        = CABasicAnimation(keyPath: "transform.scale")
         expandScale.fromValue  = 1.0
         expandScale.toValue    = 2.6

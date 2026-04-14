@@ -15,7 +15,10 @@ final class CursorOverlayManager: NSObject {
 
     private(set) var isEnabled = false
 
-    private var overlayWindows: [NSScreen: CursorOverlayWindow] = [:]
+    // Keyed by CGDirectDisplayID (a stable UInt32) rather than NSScreen —
+    // NSScreen.screens may vend new instances on each call so pointer-identity
+    // lookups would silently return nil.
+    private var overlayWindows: [CGDirectDisplayID: CursorOverlayWindow] = [:]
     private let cursorView = CursorView()
     private let monitor = MouseEventMonitor()
 
@@ -76,6 +79,10 @@ final class CursorOverlayManager: NSObject {
         cursorView.displayScale = scale
     }
 
+    func setRippleEnabled(_ enabled: Bool) {
+        cursorView.showRipple = enabled
+    }
+
     // MARK: - Monitor wiring
 
     private func wireMonitor() {
@@ -119,9 +126,14 @@ final class CursorOverlayManager: NSObject {
 
     // MARK: - Window management
 
+    private func displayID(for screen: NSScreen) -> CGDirectDisplayID {
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")]
+            as? CGDirectDisplayID) ?? 0
+    }
+
     private func buildWindows() {
         for screen in NSScreen.screens {
-            overlayWindows[screen] = CursorOverlayWindow(screen: screen)
+            overlayWindows[displayID(for: screen)] = CursorOverlayWindow(screen: screen)
         }
         if let first = overlayWindows.values.first {
             first.contentView?.addSubview(cursorView)
@@ -158,7 +170,7 @@ final class CursorOverlayManager: NSObject {
         guard let primaryH = NSScreen.screens.first?.frame.height else { return }
         let nsPoint = NSPoint(x: cgPoint.x, y: primaryH - cgPoint.y)
         guard let screen = NSScreen.screens.first(where: { $0.frame.contains(nsPoint) }),
-              let window = overlayWindows[screen] else { return }
+              let window = overlayWindows[displayID(for: screen)] else { return }
         if cursorView.window !== window {
             cursorView.removeFromSuperview()
             window.contentView?.addSubview(cursorView)

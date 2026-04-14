@@ -23,6 +23,9 @@ final class AppState: ObservableObject {
     @Published var selectedSize: CursorSize = .medium {
         didSet { manager.setCursorScale(selectedSize.scale) }
     }
+    @Published var showRipple: Bool = true {
+        didSet { manager.setRippleEnabled(showRipple) }
+    }
 
     let manager = CursorOverlayManager()
 
@@ -40,18 +43,22 @@ final class AppState: ObservableObject {
 // MARK: - Cursor size options
 
 enum CursorSize: String, CaseIterable, Identifiable {
+    case tiny   = "Tiny"
     case small  = "Small"
     case medium = "Medium"
     case large  = "Large"
+    case huge   = "Huge"
 
     var id: String { rawValue }
 
     /// Multiplier applied to the system cursor's native size.
     var scale: CGFloat {
         switch self {
-        case .small:  return 1.3
-        case .medium: return 1.8
-        case .large:  return 2.5
+        case .tiny:   return 0.8
+        case .small:  return 1.1
+        case .medium: return 1.6
+        case .large:  return 2.2
+        case .huge:   return 3.0
         }
     }
 }
@@ -76,6 +83,8 @@ struct MenuBarContentView: View {
             .pickerStyle(.inline)
             .labelsHidden()
         }
+
+        Toggle("Click Ripple", isOn: $appState.showRipple)
 
         Divider()
 
