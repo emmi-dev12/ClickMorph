@@ -1,7 +1,9 @@
 APP       = ClickMorph
+VERSION  ?= 0.1.0
 BUNDLE    = $(APP).app
 BINARY    = .build/release/$(APP)
 CONTENTS  = $(BUNDLE)/Contents
+DMG       = $(APP)-$(VERSION).dmg
 
 .PHONY: all build bundle run clean sign dmg
 
@@ -29,17 +31,18 @@ sign: bundle
 run: sign
 	open $(BUNDLE)
 
-## Package a drag-to-install DMG
+## Package a drag-to-install DMG  (override version: make dmg VERSION=1.2.3)
 dmg: sign
-	@rm -rf ClickMorph.dmg _dmg_staging
+	@rm -rf "$(DMG)" _dmg_staging
 	@mkdir _dmg_staging
 	@cp -r $(BUNDLE) _dmg_staging/
 	@ln -s /Applications _dmg_staging/Applications
-	hdiutil create -volname "ClickMorph" -srcfolder _dmg_staging -ov -format UDZO ClickMorph.dmg
+	hdiutil create -volname "ClickMorph $(VERSION)" \
+	    -srcfolder _dmg_staging -ov -format UDZO "$(DMG)"
 	@rm -rf _dmg_staging
-	@echo "Created ClickMorph.dmg — drag to /Applications to install"
+	@echo "Created $(DMG) — drag to /Applications to install"
 
 ## Remove build artefacts and the app bundle
 clean:
 	swift package clean
-	@rm -rf $(BUNDLE) ClickMorph.dmg
+	@rm -rf $(BUNDLE) ClickMorph-*.dmg
