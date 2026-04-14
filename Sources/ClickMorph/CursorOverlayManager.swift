@@ -15,41 +15,41 @@ final class CursorOverlayManager: NSObject {
 
     private(set) var isEnabled = false
 
-    // One overlay window per screen, keyed by the screen object
     private var overlayWindows: [NSScreen: CursorOverlayWindow] = [:]
-
-    // The single cursor view; moved between windows as the mouse crosses displays
     private let cursorView = CursorView()
-
     private let monitor = MouseEventMonitor()
 
-    // Reference-counted cursor hiding
+    // Cursor hiding state
     private var cursorHideDepth = 0
-    // Display IDs we've hidden — lets us show/hide only the right displays
     private var hiddenDisplayIDs: Set<CGDirectDisplayID> = []
-    // Periodically resets the CGDisplay hide counter to exactly 1 so any
-    // system-initiated show calls can't permanently surface the cursor
     private var reHideTimer: DispatchSourceTimer?
+
+    // Cursor shape tracking
+    private var shapeTimer: DispatchSourceTimer?
+    private var lastSeenCursor: NSCursor? = nil
+
+    // 1×1 fully transparent cursor — set on every mouse event so the system
+    // cursor stays invisible regardless of what other apps try to show
+    private lazy var transparentCursor: NSCursor = {
+        let img = NSImage(size: NSSize(width: 1, height: 1))
+        img.lockFocus()
+        NSColor.clear.set()
+        NSBezierPath(rect: NSRect(origin: .zero, size: img.size)).fill()
+        img.unlockFocus()
+        return NSCursor(image: img, hotSpot: .zero)
+    }()
 
     // MARK: - Public API
 
-    /// Call once from the @main App's initialiser.
     func start() {
         buildWindows()
         wireMonitor()
         NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(screensChanged),
-            name: NSApplication.didChangeScreenParametersNotification,
-            object: nil
-        )
-        // Re-raise windows to the top after the display wakes from sleep or lock screen
+            self, selector: #selector(screensChanged),
+            name: NSApplication.didChangeScreenParametersNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(
-            self,
-            selector: #selector(screensAwoke),
-            name: NSWorkspace.screensDidWakeNotification,
-            object: nil
-        )
+            self, selector: #selector(screensAwoke),
+            name: NSWorkspace.screensDidWakeNotification, object: nil)
         enable()
     }
 
@@ -57,19 +57,22 @@ final class CursorOverlayManager: NSObject {
         guard !isEnabled else { return }
         isEnabled = true
         overlayWindows.values.forEach { $0.orderFront(nil) }
+        enableBackgroundCursorOps()
         hideCursor()
         monitor.start()
+        startShapeTimer()
     }
 
     func disable() {
         guard isEnabled else { return }
         isEnabled = false
+        stopShapeTimer()
         overlayWindows.values.forEach { $0.orderOut(nil) }
         showCursor()
         monitor.stop()
     }
 
-    // MARK: - Cursor appearance pass-through
+    // MARK: - Cursor scale pass-through
 
     func setCursorScale(_ scale: CGFloat) {
         cursorView.displayScale = scale
@@ -79,24 +82,35 @@ final class CursorOverlayManager: NSObject {
 
     private func wireMonitor() {
         monitor.onMouseMove = { [weak self] point in
-            self?.updateCursorPosition(point)
+            guard let self else { return }
+            self.updateCursorPosition(point)
+            // Re-apply transparent cursor on every move so another app's cursor
+            // update never leaks through for more than one event cycle
+            if self.isEnabled { self.transparentCursor.set() }
         }
         monitor.onMouseDown = { [weak self] point in
-            self?.updateCursorPosition(point)
-            self?.cursorView.animateMouseDown()
+            guard let self else { return }
+            self.updateCursorPosition(point)
+            self.cursorView.animateMouseDown()
+            if self.isEnabled { self.transparentCursor.set() }
         }
         monitor.onMouseUp = { [weak self] point in
-            self?.updateCursorPosition(point)
-            self?.cursorView.animateMouseUp()
+            guard let self else { return }
+            self.updateCursorPosition(point)
+            self.cursorView.animateMouseUp()
+            if self.isEnabled { self.transparentCursor.set() }
         }
-        // Right-click gets the same animation
         monitor.onRightDown = { [weak self] point in
-            self?.updateCursorPosition(point)
-            self?.cursorView.animateMouseDown()
+            guard let self else { return }
+            self.updateCursorPosition(point)
+            self.cursorView.animateMouseDown()
+            if self.isEnabled { self.transparentCursor.set() }
         }
         monitor.onRightUp = { [weak self] point in
-            self?.updateCursorPosition(point)
-            self?.cursorView.animateMouseUp()
+            guard let self else { return }
+            self.updateCursorPosition(point)
+            self.cursorView.animateMouseUp()
+            if self.isEnabled { self.transparentCursor.set() }
         }
     }
 
@@ -104,12 +118,10 @@ final class CursorOverlayManager: NSObject {
 
     private func buildWindows() {
         for screen in NSScreen.screens {
-            let window = CursorOverlayWindow(screen: screen)
-            overlayWindows[screen] = window
+            overlayWindows[screen] = CursorOverlayWindow(screen: screen)
         }
-        // Add cursorView to a window so it exists in the view hierarchy
-        if let firstWindow = overlayWindows.values.first {
-            firstWindow.contentView?.addSubview(cursorView)
+        if let first = overlayWindows.values.first {
+            first.contentView?.addSubview(cursorView)
         }
     }
 
@@ -124,9 +136,6 @@ final class CursorOverlayManager: NSObject {
         buildWindows()
         if isEnabled {
             overlayWindows.values.forEach { $0.orderFront(nil) }
-            // A newly connected display was never passed to CGDisplayHideCursor.
-            // Hide only the new IDs to avoid incrementing the hide-depth counter
-            // on displays that are already hidden.
             let current = Set(activeDisplayIDs())
             current.subtracting(hiddenDisplayIDs).forEach { CGDisplayHideCursor($0) }
             hiddenDisplayIDs = current
@@ -136,39 +145,74 @@ final class CursorOverlayManager: NSObject {
     @objc private func screensAwoke() {
         if isEnabled {
             overlayWindows.values.forEach { $0.orderFront(nil) }
-            // The display server resets cursor state on wake; re-hide immediately
             reapplyCursorHide()
         }
     }
 
     // MARK: - Cursor position
 
-    private func updateCursorPosition(_ cgGlobalPoint: CGPoint) {
-        // Convert from CG coords (origin top-left, Y down) to AppKit coords (origin bottom-left, Y up)
-        guard let primaryHeight = NSScreen.screens.first?.frame.height else { return }
-        let nsGlobalPoint = NSPoint(x: cgGlobalPoint.x, y: primaryHeight - cgGlobalPoint.y)
-
-        // Find which screen contains the cursor
-        guard let targetScreen = NSScreen.screens.first(where: { $0.frame.contains(nsGlobalPoint) }) else { return }
-        guard let targetWindow = overlayWindows[targetScreen] else { return }
-
-        // If the view is on a different window, move it
-        if cursorView.window !== targetWindow {
+    private func updateCursorPosition(_ cgPoint: CGPoint) {
+        guard let primaryH = NSScreen.screens.first?.frame.height else { return }
+        let nsPoint = NSPoint(x: cgPoint.x, y: primaryH - cgPoint.y)
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(nsPoint) }),
+              let window = overlayWindows[screen] else { return }
+        if cursorView.window !== window {
             cursorView.removeFromSuperview()
-            targetWindow.contentView?.addSubview(cursorView)
+            window.contentView?.addSubview(cursorView)
         }
+        cursorView.moveHotspot(to: window.convertPoint(fromScreen: nsPoint))
+    }
 
-        // Convert global AppKit point → window-local point → view coordinate
-        let windowPoint = targetWindow.convertPoint(fromScreen: nsGlobalPoint)
-        cursorView.moveHotspot(to: windowPoint)
+    // MARK: - Cursor shape tracking
+
+    /// Polls NSCursor.currentSystem every 30 ms and updates the overlay image
+    /// whenever the cursor shape changes (arrow → i-beam → pointer hand, etc.)
+    private func startShapeTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(30))
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            let current = NSCursor.currentSystem ?? .arrow
+            if current !== self.lastSeenCursor {
+                self.lastSeenCursor = current
+                self.cursorView.updateCursor(current)
+                // Re-hide immediately after a cursor change so there is no flash
+                self.transparentCursor.set()
+            }
+        }
+        timer.resume()
+        shapeTimer = timer
+    }
+
+    private func stopShapeTimer() {
+        shapeTimer?.cancel()
+        shapeTimer = nil
+        lastSeenCursor = nil
     }
 
     // MARK: - Cursor hiding
 
+    /// Tells the window server that this connection may set the cursor even
+    /// when it is not the frontmost application.
+    /// Uses private CoreGraphics SPI via dlsym so the app fails gracefully
+    /// if the symbol is ever removed rather than crashing at link time.
+    private func enableBackgroundCursorOps() {
+        typealias GetConn  = @convention(c) () -> UInt32
+        typealias SetProp  = @convention(c) (UInt32, UInt32, CFString, CFTypeRef) -> Int32
+        guard let rawGet  = dlsym(RTLD_DEFAULT, "CGSMainConnectionID"),
+              let rawSet  = dlsym(RTLD_DEFAULT, "CGSSetConnectionProperty") else { return }
+        let getConn = unsafeBitCast(rawGet, to: GetConn.self)
+        let setProp = unsafeBitCast(rawSet, to: SetProp.self)
+        let conn = getConn()
+        _ = setProp(conn, conn, "SetsCursorInBackground" as CFString,
+                    kCFBooleanTrue as CFTypeRef)
+    }
+
     private func hideCursor() {
         if cursorHideDepth == 0 {
-            // NSCursor.hide() is Apple's recommended replacement for the deprecated
-            // CGDisplayHideCursor. On macOS 14+ it operates at the window-server level.
+            // Set a transparent cursor image — invisible, no counter issues
+            transparentCursor.set()
+            // Belt-and-suspenders: also use the legacy hide APIs
             NSCursor.hide()
             reapplyCursorHide()
             startReHideTimer()
@@ -182,14 +226,15 @@ final class CursorOverlayManager: NSObject {
         if cursorHideDepth == 0 {
             stopReHideTimer()
             NSCursor.unhide()
+            NSCursor.arrow.set()
             hiddenDisplayIDs.forEach { CGDisplayShowCursor($0) }
             hiddenDisplayIDs = []
         }
     }
 
-    /// Resets the CGDisplay hide counter to exactly 1 on every active display.
-    /// Calling show → hide in the same synchronous block is atomic from the
-    /// compositor's perspective — no frame is rendered between the two calls.
+    /// Resets the CGDisplay hide counter to exactly 1 on every active display
+    /// (show → depth 0, hide → depth 1) — the two calls are synchronous so
+    /// no compositor frame renders between them.
     private func reapplyCursorHide() {
         hiddenDisplayIDs.forEach { CGDisplayShowCursor($0) }
         let ids = activeDisplayIDs()
@@ -197,13 +242,12 @@ final class CursorOverlayManager: NSObject {
         hiddenDisplayIDs = Set(ids)
     }
 
-    /// Fires every 2 s to recover from any system-side CGDisplayShowCursor call
-    /// that might have decremented our hide counter to 0.
     private func startReHideTimer() {
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + 0.5, repeating: 2.0)
         timer.setEventHandler { [weak self] in
             self?.reapplyCursorHide()
+            self?.transparentCursor.set()
         }
         timer.resume()
         reHideTimer = timer
@@ -214,7 +258,6 @@ final class CursorOverlayManager: NSObject {
         reHideTimer = nil
     }
 
-    /// Returns all currently active (non-mirrored, non-sleeping) display IDs.
     private func activeDisplayIDs() -> [CGDirectDisplayID] {
         var count: UInt32 = 0
         CGGetActiveDisplayList(0, nil, &count)

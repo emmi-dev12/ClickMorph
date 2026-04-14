@@ -16,6 +16,14 @@ final class CursorView: NSView {
         didSet { rebuildLayers() }
     }
 
+    /// Replace the displayed cursor shape (arrow → i-beam → pointer, etc.).
+    /// Rebuilds layers; the next moveHotspot call repositions correctly.
+    func updateCursor(_ cursor: NSCursor) {
+        guard cursor !== currentCursor else { return }
+        currentCursor = cursor
+        rebuildLayers()
+    }
+
     // MARK: - Layers
 
     private let cursorLayer = CALayer()
@@ -24,6 +32,9 @@ final class CursorView: NSView {
     // Pixels from the view's top-left corner to the cursor hot-spot.
     // Extra breathing room for the ripple ring and the spring overshoot.
     private let tipPadding: CGFloat = 24
+
+    // Currently rendered cursor — updated via updateCursor(_:)
+    private var currentCursor: NSCursor = .arrow
 
     // MARK: - Init
 
@@ -38,7 +49,7 @@ final class CursorView: NSView {
 
     // MARK: - Layer construction
 
-    private var systemCursor: NSCursor { .arrow }
+    private var systemCursor: NSCursor { currentCursor }
 
     /// Logical size of the cursor image at the current displayScale.
     private var scaledSize: CGSize {
