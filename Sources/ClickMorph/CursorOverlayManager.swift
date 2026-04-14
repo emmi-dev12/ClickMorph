@@ -23,10 +23,13 @@ final class CursorOverlayManager: NSObject {
 
     private let monitor = MouseEventMonitor()
 
-    // Reference-counted cursor hiding — CGDisplayHideCursor is cumulative per display
+    // Reference-counted cursor hiding
     private var cursorHideDepth = 0
-    // Track which display IDs we've hidden so screensChanged can hide only new ones
+    // Display IDs we've hidden — lets us show/hide only the right displays
     private var hiddenDisplayIDs: Set<CGDirectDisplayID> = []
+    // Periodically resets the CGDisplay hide counter to exactly 1 so any
+    // system-initiated show calls can't permanently surface the cursor
+    private var reHideTimer: DispatchSourceTimer?
 
     // MARK: - Public API
 
@@ -135,9 +138,10 @@ final class CursorOverlayManager: NSObject {
     }
 
     @objc private func screensAwoke() {
-        // After sleep/lock the window order can be disrupted; restore it
         if isEnabled {
             overlayWindows.values.forEach { $0.orderFront(nil) }
+            // The display server resets cursor state on wake; re-hide immediately
+            reapplyCursorHide()
         }
     }
 
@@ -163,18 +167,15 @@ final class CursorOverlayManager: NSObject {
         cursorView.moveCenter(to: windowPoint)
     }
 
-    // MARK: - Cursor hiding (display-level, works from a background / LSUIElement process)
-    //
-    // NSCursor.hide() is application-scoped: it only takes effect while that app is
-    // frontmost. Since ClickMorph is an LSUIElement that is never frontmost, it has
-    // no effect. CGDisplayHideCursor/ShowCursor operate at the display/window-server
-    // level and persist regardless of which app is active.
+    // MARK: - Cursor hiding
 
     private func hideCursor() {
         if cursorHideDepth == 0 {
-            let ids = activeDisplayIDs()
-            ids.forEach { CGDisplayHideCursor($0) }
-            hiddenDisplayIDs = Set(ids)
+            // NSCursor.hide() is Apple's recommended replacement for the deprecated
+            // CGDisplayHideCursor. On macOS 14+ it operates at the window-server level.
+            NSCursor.hide()
+            reapplyCursorHide()
+            startReHideTimer()
         }
         cursorHideDepth += 1
     }
@@ -183,9 +184,38 @@ final class CursorOverlayManager: NSObject {
         guard cursorHideDepth > 0 else { return }
         cursorHideDepth -= 1
         if cursorHideDepth == 0 {
+            stopReHideTimer()
+            NSCursor.unhide()
             hiddenDisplayIDs.forEach { CGDisplayShowCursor($0) }
             hiddenDisplayIDs = []
         }
+    }
+
+    /// Resets the CGDisplay hide counter to exactly 1 on every active display.
+    /// Calling show → hide in the same synchronous block is atomic from the
+    /// compositor's perspective — no frame is rendered between the two calls.
+    private func reapplyCursorHide() {
+        hiddenDisplayIDs.forEach { CGDisplayShowCursor($0) }
+        let ids = activeDisplayIDs()
+        ids.forEach { CGDisplayHideCursor($0) }
+        hiddenDisplayIDs = Set(ids)
+    }
+
+    /// Fires every 2 s to recover from any system-side CGDisplayShowCursor call
+    /// that might have decremented our hide counter to 0.
+    private func startReHideTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 0.5, repeating: 2.0)
+        timer.setEventHandler { [weak self] in
+            self?.reapplyCursorHide()
+        }
+        timer.resume()
+        reHideTimer = timer
+    }
+
+    private func stopReHideTimer() {
+        reHideTimer?.cancel()
+        reHideTimer = nil
     }
 
     /// Returns all currently active (non-mirrored, non-sleeping) display IDs.
