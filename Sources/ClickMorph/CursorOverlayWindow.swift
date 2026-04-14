@@ -5,14 +5,15 @@ import AppKit
 final class CursorOverlayWindow: NSWindow {
 
     init(screen: NSScreen) {
-        // Use screen.frame (full physical pixels including menu bar area),
-        // NOT screen.visibleFrame which excludes the Dock and menu bar.
+        // contentRect is screen.frame in global coordinates, so AppKit places
+        // the window on the correct display without needing the screen: parameter.
+        // (The screen: overload is a convenience init; Swift subclasses must call
+        // a designated init, which is the four-argument form below.)
         super.init(
             contentRect: screen.frame,
             styleMask: [.borderless],
             backing: .buffered,
-            defer: false,
-            screen: screen
+            defer: false
         )
 
         // Fully transparent background — the window itself is invisible;
