@@ -36,8 +36,10 @@ final class CursorOverlayWindow: NSWindow {
         isExcludedFromWindowsMenu = true
         hidesOnDeactivate = false
 
-        // Don't show in screenshots or screen recordings taken by other apps.
-        sharingType = .none
+        // Allow screen recording apps to capture this window so the animated
+        // cursor is visible in recordings (replaces tools like Focusee).
+        // .readOnly lets recorders read the pixels; they cannot write to it.
+        sharingType = .readOnly
 
         // Appear on every Space, don't animate with Mission Control, work in full-screen.
         collectionBehavior = [
