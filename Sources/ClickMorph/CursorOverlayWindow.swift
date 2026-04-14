@@ -15,26 +15,30 @@ final class CursorOverlayWindow: NSWindow {
             screen: screen
         )
 
-        // Fully transparent background
+        // Fully transparent background — the window itself is invisible;
+        // only the CALayers drawn by CursorView are ever visible.
         backgroundColor = .clear
         isOpaque = false
         hasShadow = false
+        alphaValue = 1  // keep at 1 so content layers render, but bg is .clear
 
-        // Float above normal app windows. .screenSaver (level 2000) is above
-        // all regular content but below system alerts and notifications.
-        level = .screenSaver
+        // Sit at the cursor window level — the same tier the hardware cursor
+        // occupies, which is Int32.max. Nothing in macOS renders above this:
+        // not system alerts, not Spotlight, not the screen saver.
+        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.cursorWindow)))
 
         // All mouse events fall through to whatever window is underneath.
         ignoresMouseEvents = true
 
-        // Don't show in screenshots taken by other apps.
-        // Set to .readOnly if you want the custom cursor visible in screen recordings.
+        // Prevent any activation path — this window must never steal focus,
+        // appear in the window list, or show as "frontmost" to other apps.
+        isExcludedFromWindowsMenu = true
+        hidesOnDeactivate = false
+
+        // Don't show in screenshots or screen recordings taken by other apps.
         sharingType = .none
 
-        // Exclude from Cmd+` window cycling
-        isExcludedFromWindowsMenu = true
-
-        // Appear on every Space, don't animate with Mission Control, work in full-screen
+        // Appear on every Space, don't animate with Mission Control, work in full-screen.
         collectionBehavior = [
             .canJoinAllSpaces,
             .stationary,
@@ -42,4 +46,9 @@ final class CursorOverlayWindow: NSWindow {
             .fullScreenAuxiliary
         ]
     }
+
+    // Guarantee this window can never become the key or main window,
+    // regardless of how the system tries to assign it.
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
 }
