@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import QuartzCore
 
 /// Central coordinator. Owns:
@@ -22,7 +23,7 @@ final class CursorOverlayManager: NSObject {
 
     private let monitor = MouseEventMonitor()
 
-    // Reference-counted cursor hiding — NSCursor.hide() is cumulative
+    // Reference-counted cursor hiding — CGDisplayHideCursor is cumulative
     private var cursorHideDepth = 0
 
     // MARK: - Public API
@@ -35,6 +36,13 @@ final class CursorOverlayManager: NSObject {
             self,
             selector: #selector(screensChanged),
             name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+        // Re-raise windows to the top after the display wakes from sleep or lock screen
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(screensAwoke),
+            name: NSWorkspace.screensDidWakeNotification,
             object: nil
         )
         enable()
@@ -118,6 +126,13 @@ final class CursorOverlayManager: NSObject {
         }
     }
 
+    @objc private func screensAwoke() {
+        // After sleep/lock the window order can be disrupted; restore it
+        if isEnabled {
+            overlayWindows.values.forEach { $0.orderFront(nil) }
+        }
+    }
+
     // MARK: - Cursor position
 
     private func updateCursorPosition(_ cgGlobalPoint: CGPoint) {
@@ -140,14 +155,16 @@ final class CursorOverlayManager: NSObject {
         cursorView.moveCenter(to: windowPoint)
     }
 
-    // MARK: - Cursor hiding (reference-counted)
+    // MARK: - Cursor hiding (display-level, works from a background / LSUIElement process)
+    //
+    // NSCursor.hide() is application-scoped: it only takes effect while that app is
+    // frontmost. Since ClickMorph is an LSUIElement that is never frontmost, it has
+    // no effect. CGDisplayHideCursor/ShowCursor operate at the display/window-server
+    // level and persist regardless of which app is active.
 
     private func hideCursor() {
         if cursorHideDepth == 0 {
-            NSCursor.hide()
-            // Belt-and-suspenders: set a transparent cursor so the system
-            // renders nothing even if hide() doesn't fully suppress it
-            makeTransparentCursor()?.set()
+            activeDisplayIDs().forEach { CGDisplayHideCursor($0) }
         }
         cursorHideDepth += 1
     }
@@ -156,18 +173,17 @@ final class CursorOverlayManager: NSObject {
         guard cursorHideDepth > 0 else { return }
         cursorHideDepth -= 1
         if cursorHideDepth == 0 {
-            NSCursor.unhide()
-            NSCursor.arrow.set()
+            activeDisplayIDs().forEach { CGDisplayShowCursor($0) }
         }
     }
 
-    private func makeTransparentCursor() -> NSCursor? {
-        let size = NSSize(width: 1, height: 1)
-        let image = NSImage(size: size)
-        image.lockFocus()
-        NSColor.clear.set()
-        NSRect(origin: .zero, size: size).fill()
-        image.unlockFocus()
-        return NSCursor(image: image, hotSpot: .zero)
+    /// Returns all currently active (non-mirrored, non-sleeping) display IDs.
+    private func activeDisplayIDs() -> [CGDirectDisplayID] {
+        var count: UInt32 = 0
+        CGGetActiveDisplayList(0, nil, &count)
+        guard count > 0 else { return [] }
+        var ids = [CGDirectDisplayID](repeating: kCGNullDirectDisplay, count: Int(count))
+        CGGetActiveDisplayList(count, &ids, &count)
+        return ids
     }
 }
