@@ -87,6 +87,14 @@ final class CursorOverlayManager: NSObject {
         cursorView.showClickSwell = enabled
     }
 
+    func setTintColor(_ color: NSColor?) {
+        cursorView.tintColor = color
+    }
+
+    func setAnimationSpeed(_ speed: Double) {
+        cursorView.animationSpeed = speed
+    }
+
     // MARK: - Monitor wiring
 
     private func wireMonitor() {

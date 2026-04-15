@@ -21,6 +21,15 @@ final class CursorView: NSView {
     /// Whether to show the expanding ripple ring on mouse-down.
     var showRipple: Bool = true
 
+    /// Optional tint colour blended over the cursor image (multiply blend mode).
+    /// Set to nil for no tint.
+    var tintColor: NSColor? = nil {
+        didSet { rebuildLayers() }
+    }
+
+    /// Animation speed multiplier. 1.0 = default. Higher = faster.
+    var animationSpeed: Double = 1.0
+
     /// Replace the displayed cursor shape (arrow → i-beam → pointer, etc.).
     func updateCursor(_ cursor: NSCursor) {
         guard cursor.image.size != currentCursor.image.size ||
@@ -117,12 +126,8 @@ final class CursorView: NSView {
         cursorLayer.anchorPoint = CGPoint(x: anchorX, y: anchorY)
         cursorLayer.position    = hotInView
 
-        var proposedRect = CGRect(origin: .zero, size: ss)
-        if let cgImg = systemCursor.image.cgImage(
-            forProposedRect: &proposedRect, context: nil, hints: nil) {
-            cursorLayer.contents      = cgImg
-            cursorLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
-        }
+        cursorLayer.contents      = tintedCursorImage(size: ss)
+        cursorLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
 
         let rippleD: CGFloat = max(ss.width, ss.height) * 0.65
         rippleLayer.bounds       = CGRect(x: 0, y: 0, width: rippleD, height: rippleD)
@@ -130,6 +135,47 @@ final class CursorView: NSView {
         rippleLayer.cornerRadius = rippleD / 2
 
         CATransaction.commit()
+    }
+
+    // MARK: - Tint rendering
+
+    /// Renders the cursor image, optionally blending tintColor on top using
+    /// multiply compositing so the cursor silhouette is preserved.
+    private func tintedCursorImage(size: CGSize) -> CGImage? {
+        let src = systemCursor.image
+        var proposedRect = CGRect(origin: .zero, size: size)
+        guard let base = src.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil)
+        else { return nil }
+        guard let tint = tintColor else { return base }
+
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        let px    = Int(size.width * scale)
+        let py    = Int(size.height * scale)
+        guard px > 0, py > 0 else { return base }
+
+        let cs  = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: px, height: py,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: cs,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return base }
+
+        ctx.scaleBy(x: scale, y: scale)
+
+        // Draw original cursor
+        ctx.draw(base, in: CGRect(origin: .zero, size: size))
+
+        // Multiply the tint — preserves alpha, darkens toward tint hue
+        ctx.setBlendMode(.multiply)
+        ctx.setFillColor(tint.cgColor)
+        ctx.fill(CGRect(origin: .zero, size: size))
+
+        // Restore alpha that multiply blend may have clipped on transparent pixels
+        ctx.setBlendMode(.destinationIn)
+        ctx.draw(base, in: CGRect(origin: .zero, size: size))
+
+        return ctx.makeImage()
     }
 
     // MARK: - Animations
@@ -147,7 +193,7 @@ final class CursorView: NSView {
             let shrink = CABasicAnimation(keyPath: "transform.scale")
             shrink.fromValue      = fromScale
             shrink.toValue        = 0.6
-            shrink.duration       = 0.12
+            shrink.duration       = 0.12 / max(animationSpeed, 0.01)
             shrink.timingFunction = CAMediaTimingFunction(name: .easeOut)
             cursorLayer.add(shrink, forKey: "shrink")
         }
@@ -164,7 +210,7 @@ final class CursorView: NSView {
 
         let group             = CAAnimationGroup()
         group.animations      = [expandScale, fade]
-        group.duration        = 0.40
+        group.duration        = 0.40 / max(animationSpeed, 0.01)
         group.timingFunction  = CAMediaTimingFunction(name: .easeOut)
         rippleLayer.add(group, forKey: "ripple")
     }
@@ -184,7 +230,7 @@ final class CursorView: NSView {
         spring.fromValue       = fromScale
         spring.toValue         = 1.0
         spring.mass            = 1.0
-        spring.stiffness       = 280
+        spring.stiffness       = 280 * max(animationSpeed, 0.01)
         spring.damping         = 18
         spring.initialVelocity = 0
         spring.duration        = spring.settlingDuration
