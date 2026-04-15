@@ -5,14 +5,15 @@ import AppKit
 final class CursorOverlayWindow: NSWindow {
 
     init(screen: NSScreen) {
-        // Use screen.frame (full physical pixels including menu bar area),
-        // NOT screen.visibleFrame which excludes the Dock and menu bar.
+        // contentRect is screen.frame in global coordinates, so AppKit places
+        // the window on the correct display without needing the screen: parameter.
+        // (The screen: overload is a convenience init; Swift subclasses must call
+        // a designated init, which is the four-argument form below.)
         super.init(
             contentRect: screen.frame,
             styleMask: [.borderless],
             backing: .buffered,
-            defer: false,
-            screen: screen
+            defer: false
         )
 
         // Fully transparent background — the window itself is invisible;
@@ -35,8 +36,10 @@ final class CursorOverlayWindow: NSWindow {
         isExcludedFromWindowsMenu = true
         hidesOnDeactivate = false
 
-        // Don't show in screenshots or screen recordings taken by other apps.
-        sharingType = .none
+        // Allow screen recording apps to capture this window so the animated
+        // cursor is visible in recordings (replaces tools like Focusee).
+        // .readOnly lets recorders read the pixels; they cannot write to it.
+        sharingType = .readOnly
 
         // Appear on every Space, don't animate with Mission Control, work in full-screen.
         collectionBehavior = [

@@ -30,5 +30,8 @@
 
     <key>CFBundleExecutable</key>
     <string>ClickMorph</string>
+
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
 </dict>
 </plist>

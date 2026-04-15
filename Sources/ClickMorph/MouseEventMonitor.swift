@@ -17,6 +17,8 @@ final class MouseEventMonitor {
     var onMouseUp:    ((CGPoint) -> Void)?
     var onRightDown:  ((CGPoint) -> Void)?
     var onRightUp:    ((CGPoint) -> Void)?
+    var onMiddleDown: ((CGPoint) -> Void)?
+    var onMiddleUp:   ((CGPoint) -> Void)?
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -42,7 +44,8 @@ final class MouseEventMonitor {
     // MARK: - CGEventTap install / remove
 
     private func installTap() {
-        let eventsOfInterest: CGEventMask =
+        // Split into two lines so the Swift type-checker doesn't time out.
+        let mouseMask: CGEventMask =
             (1 << CGEventType.mouseMoved.rawValue)        |
             (1 << CGEventType.leftMouseDown.rawValue)     |
             (1 << CGEventType.leftMouseUp.rawValue)       |
@@ -50,6 +53,11 @@ final class MouseEventMonitor {
             (1 << CGEventType.rightMouseDown.rawValue)    |
             (1 << CGEventType.rightMouseUp.rawValue)      |
             (1 << CGEventType.rightMouseDragged.rawValue)
+        let otherMask: CGEventMask =
+            (1 << CGEventType.otherMouseDown.rawValue)    |
+            (1 << CGEventType.otherMouseUp.rawValue)      |
+            (1 << CGEventType.otherMouseDragged.rawValue)
+        let eventsOfInterest: CGEventMask = mouseMask | otherMask
 
         // Pass `self` as the userInfo pointer. Use passUnretained — the
         // CursorOverlayManager owns both the monitor and the tap lifetime,
@@ -91,7 +99,7 @@ final class MouseEventMonitor {
 
     private static let tapCallback: CGEventTapCallBack = { proxy, type, event, userInfo in
         guard let userInfo = userInfo else {
-            return Unmanaged.passRetained(event)
+            return Unmanaged.passUnretained(event)
         }
         let monitor = Unmanaged<MouseEventMonitor>.fromOpaque(userInfo).takeUnretainedValue()
         monitor.dispatch(type: type, event: event)
@@ -101,10 +109,12 @@ final class MouseEventMonitor {
     }
 
     private func dispatch(type: CGEventType, event: CGEvent) {
-        // Re-enable the tap if macOS silently disabled it (timeout or permission revoke)
-        let disabledByTimeout = CGEventType(rawValue: UInt32(kCGEventTapDisabledByTimeout))
-        let disabledByUser    = CGEventType(rawValue: UInt32(kCGEventTapDisabledByUserInput))
-        if type == disabledByTimeout || type == disabledByUser {
+        // Re-enable the tap if macOS silently disabled it (timeout or permission revoke).
+        // Use raw hex values instead of kCGEventTapDisabledByTimeout/UserInput — those
+        // constants import as C int (potentially Int32) and UInt32(negativeInt32) traps.
+        //   0xFFFFFFFE = kCGEventTapDisabledByTimeout
+        //   0xFFFFFFFD = kCGEventTapDisabledByUserInput
+        if type.rawValue == 0xFFFFFFFE || type.rawValue == 0xFFFFFFFD {
             if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
             return
         }
@@ -115,7 +125,7 @@ final class MouseEventMonitor {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             switch type {
-            case .mouseMoved, .leftMouseDragged, .rightMouseDragged:
+            case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
                 self.onMouseMove?(location)
             case .leftMouseDown:
                 self.onMouseDown?(location)
@@ -125,6 +135,10 @@ final class MouseEventMonitor {
                 self.onRightDown?(location)
             case .rightMouseUp:
                 self.onRightUp?(location)
+            case .otherMouseDown:
+                self.onMiddleDown?(location)
+            case .otherMouseUp:
+                self.onMiddleUp?(location)
             default:
                 break
             }

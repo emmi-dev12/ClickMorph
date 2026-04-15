@@ -1,156 +1,250 @@
 import AppKit
 import QuartzCore
 
-/// The visual cursor rendered on the overlay window.
+/// Renders the system cursor image at a configurable scale, with a
+/// click-shrink + spring-back animation and an optional outward ripple ring.
 ///
-/// Layout: a fixed 60×60 pt transparent container view. Inside it:
-///   - `rippleLayer`: an expanding ring that plays on mouseDown
-///   - `cursorLayer`: a filled circle that shrinks on mouseDown and springs back on mouseUp
-///
-/// The entire view is repositioned on every mouse-move event to track the cursor.
-/// Animations on the position change are disabled so tracking is instant.
+/// Positioning is hot-spot based: `moveHotspot(to:)` places the cursor TIP
+/// (not the view centre) at the given window coordinate.
 final class CursorView: NSView {
 
     // MARK: - Configuration
 
-    var cursorDiameter: CGFloat = 28 {
-        didSet { reconfigureLayers() }
+    /// Multiplier applied to the system cursor's logical size.
+    var displayScale: CGFloat = 2.0 {
+        didSet { rebuildLayers() }
     }
 
-    var cursorNSColor: NSColor = .white {
-        didSet { reconfigureLayers() }
+    /// Whether to animate the cursor shrink/spring on click.
+    var showClickSwell: Bool = true
+
+    /// Whether to show the expanding ripple ring on mouse-down.
+    var showRipple: Bool = true
+
+    /// Optional tint colour blended over the cursor image (multiply blend mode).
+    /// Set to nil for no tint.
+    var tintColor: NSColor? = nil {
+        didSet { rebuildLayers() }
+    }
+
+    /// Animation speed multiplier. 1.0 = default. Higher = faster.
+    var animationSpeed: Double = 1.0
+
+    /// Replace the displayed cursor shape (arrow → i-beam → pointer, etc.).
+    func updateCursor(_ cursor: NSCursor) {
+        guard cursor.image.size != currentCursor.image.size ||
+              cursor.hotSpot    != currentCursor.hotSpot    else { return }
+        currentCursor = cursor
+        rebuildLayers()
     }
 
     // MARK: - Layers
 
-    private var cursorLayer = CALayer()
-    private var rippleLayer = CALayer()
+    private let cursorLayer = CALayer()
+    private let rippleLayer = CALayer()
+
+    // Extra space around the hot-spot for the ripple and spring overshoot.
+    private let tipPadding: CGFloat = 24
+
+    private var currentCursor: NSCursor = .arrow
 
     // MARK: - Init
 
     init() {
-        // Fixed 60×60 pt frame gives ~16 pt of padding all around for shadow + ripple
-        super.init(frame: NSRect(x: 0, y: 0, width: 60, height: 60))
+        super.init(frame: .zero)
         wantsLayer = true
         layer?.masksToBounds = false
-        setupLayers()
+        setupStaticLayers()
+        rebuildLayers()
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    // MARK: - Layer setup
+    // MARK: - Layer construction
 
-    private func setupLayers() {
-        let center = CGPoint(x: 30, y: 30)
+    private var systemCursor: NSCursor { currentCursor }
 
-        // Ripple ring — starts fully transparent, animated only on click
-        rippleLayer.bounds = CGRect(x: 0, y: 0, width: cursorDiameter, height: cursorDiameter)
-        rippleLayer.position = center
-        rippleLayer.cornerRadius = cursorDiameter / 2
-        rippleLayer.backgroundColor = CGColor.clear
-        rippleLayer.borderColor = cursorNSColor.withAlphaComponent(0.65).cgColor
-        rippleLayer.borderWidth = 2
-        rippleLayer.opacity = 0
-        rippleLayer.masksToBounds = false
+    private var scaledSize: CGSize {
+        let s = systemCursor.image.size
+        return CGSize(width: s.width * displayScale, height: s.height * displayScale)
+    }
 
-        // Cursor dot — filled circle with a soft drop shadow
-        cursorLayer.bounds = CGRect(x: 0, y: 0, width: cursorDiameter, height: cursorDiameter)
-        cursorLayer.position = center
-        cursorLayer.cornerRadius = cursorDiameter / 2
-        cursorLayer.backgroundColor = cursorNSColor.cgColor
-        cursorLayer.shadowColor = NSColor.black.cgColor
-        cursorLayer.shadowOpacity = 0.45
-        cursorLayer.shadowRadius = 5
-        cursorLayer.shadowOffset = CGSize(width: 0, height: -2)
+    private var scaledHotSpot: CGPoint {
+        let h = systemCursor.hotSpot
+        return CGPoint(x: h.x * displayScale, y: h.y * displayScale)
+    }
+
+    /// Runs once from init(). Sets fixed layer properties and inserts both
+    /// layers into the hierarchy — they are never removed or re-added.
+    private func setupStaticLayers() {
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+
+        // ── Cursor layer ──────────────────────────────────────────────────
         cursorLayer.masksToBounds = false
+        cursorLayer.shadowColor   = NSColor.black.cgColor
+        cursorLayer.shadowOpacity = 0.45
+        cursorLayer.shadowRadius  = 4
+        cursorLayer.shadowOffset  = CGSize(width: 1, height: -1)
+        // Cache the cursor image as a GPU bitmap. Only the transform animates,
+        // which is a cheap compositing op on the cached bitmap — avoids
+        // re-rendering the image on every frame.
+        cursorLayer.shouldRasterize    = true
+        cursorLayer.rasterizationScale = scale
+
+        // ── Ripple layer ──────────────────────────────────────────────────
+        rippleLayer.anchorPoint     = CGPoint(x: 0.5, y: 0.5)
+        rippleLayer.backgroundColor = CGColor.clear
+        rippleLayer.borderColor     = NSColor.white.withAlphaComponent(0.75).cgColor
+        rippleLayer.borderWidth     = 2
+        rippleLayer.opacity         = 0
+        rippleLayer.masksToBounds   = false
 
         layer?.addSublayer(rippleLayer)
         layer?.addSublayer(cursorLayer)
     }
 
-    private func reconfigureLayers() {
+    /// Updates only the dynamic geometry and content. Never adds or removes
+    /// sublayers — that only happens in setupStaticLayers().
+    private func rebuildLayers() {
+        let ss  = scaledSize
+        let shs = scaledHotSpot
+
+        let viewW = tipPadding + max(ss.width  - shs.x, shs.x) * 2 + tipPadding
+        let viewH = tipPadding + max(ss.height - shs.y, shs.y) * 2 + tipPadding
+        frame.size = CGSize(width: max(viewW, 80), height: max(viewH, 80))
+
+        let hotInView = CGPoint(x: tipPadding, y: frame.height - tipPadding)
+
+        let anchorX = ss.width  > 0 ? shs.x / ss.width  : 0
+        let anchorY = ss.height > 0 ? 1.0 - shs.y / ss.height : 1.0
+
+        // Suppress implicit CA animations while updating geometry/content.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        cursorLayer.bounds = CGRect(x: 0, y: 0, width: cursorDiameter, height: cursorDiameter)
-        cursorLayer.cornerRadius = cursorDiameter / 2
-        cursorLayer.backgroundColor = cursorNSColor.cgColor
-        rippleLayer.bounds = CGRect(x: 0, y: 0, width: cursorDiameter, height: cursorDiameter)
-        rippleLayer.cornerRadius = cursorDiameter / 2
-        rippleLayer.borderColor = cursorNSColor.withAlphaComponent(0.65).cgColor
+
+        cursorLayer.bounds      = CGRect(origin: .zero, size: ss)
+        cursorLayer.anchorPoint = CGPoint(x: anchorX, y: anchorY)
+        cursorLayer.position    = hotInView
+
+        cursorLayer.contents      = tintedCursorImage(size: ss)
+        cursorLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+
+        let rippleD: CGFloat = max(ss.width, ss.height) * 0.65
+        rippleLayer.bounds       = CGRect(x: 0, y: 0, width: rippleD, height: rippleD)
+        rippleLayer.position     = hotInView
+        rippleLayer.cornerRadius = rippleD / 2
+
         CATransaction.commit()
+    }
+
+    // MARK: - Tint rendering
+
+    /// Renders the cursor image, optionally blending tintColor on top using
+    /// multiply compositing so the cursor silhouette is preserved.
+    private func tintedCursorImage(size: CGSize) -> CGImage? {
+        let src = systemCursor.image
+        var proposedRect = CGRect(origin: .zero, size: size)
+        guard let base = src.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil)
+        else { return nil }
+        guard let tint = tintColor else { return base }
+
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        let px    = Int(size.width * scale)
+        let py    = Int(size.height * scale)
+        guard px > 0, py > 0 else { return base }
+
+        let cs  = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: px, height: py,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: cs,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return base }
+
+        ctx.scaleBy(x: scale, y: scale)
+
+        // Draw original cursor
+        ctx.draw(base, in: CGRect(origin: .zero, size: size))
+
+        // Multiply the tint — preserves alpha, darkens toward tint hue
+        ctx.setBlendMode(.multiply)
+        ctx.setFillColor(tint.cgColor)
+        ctx.fill(CGRect(origin: .zero, size: size))
+
+        // Restore alpha that multiply blend may have clipped on transparent pixels
+        ctx.setBlendMode(.destinationIn)
+        ctx.draw(base, in: CGRect(origin: .zero, size: size))
+
+        return ctx.makeImage()
     }
 
     // MARK: - Animations
 
     func animateMouseDown() {
-        // Correct Core Animation pattern:
-        //   1. Commit the final model value immediately (disabled transaction — no implicit anim)
-        //   2. Add a purely visual animation from the current presentation value to the target
-        // This guarantees the model is always correct; the animation is just eye candy.
-        // isRemovedOnCompletion = true (default) means once the animation finishes, the layer
-        // naturally shows the model value — no stale frozen animation left behind.
+        if showClickSwell {
+            let fromScale = cursorLayer.presentation()?
+                .value(forKeyPath: "transform.scale") as? CGFloat ?? 1.0
 
-        let fromScale = cursorLayer.presentation()?.value(forKeyPath: "transform.scale") as? CGFloat ?? 1.0
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            cursorLayer.setValue(0.6, forKeyPath: "transform.scale")
+            CATransaction.commit()
 
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        cursorLayer.setValue(0.6, forKeyPath: "transform.scale")
-        CATransaction.commit()
+            let shrink = CABasicAnimation(keyPath: "transform.scale")
+            shrink.fromValue      = fromScale
+            shrink.toValue        = 0.6
+            shrink.duration       = 0.12 / max(animationSpeed, 0.01)
+            shrink.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            cursorLayer.add(shrink, forKey: "shrink")
+        }
 
-        let shrink = CABasicAnimation(keyPath: "transform.scale")
-        shrink.fromValue = fromScale
-        shrink.toValue = 0.6
-        shrink.duration = 0.12
-        shrink.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        cursorLayer.add(shrink, forKey: "shrink")
+        guard showRipple else { return }
 
-        // Ripple: ring expands and fades out
-        let rippleScale = CABasicAnimation(keyPath: "transform.scale")
-        rippleScale.fromValue = 1.0
-        rippleScale.toValue = 2.4
-        rippleScale.duration = 0.38
+        let expandScale       = CABasicAnimation(keyPath: "transform.scale")
+        expandScale.fromValue = 1.0
+        expandScale.toValue   = 2.6
 
-        let rippleFade = CABasicAnimation(keyPath: "opacity")
-        rippleFade.fromValue = 0.7
-        rippleFade.toValue = 0.0
-        rippleFade.duration = 0.38
+        let fade              = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue        = 0.75
+        fade.toValue          = 0.0
 
-        let rippleGroup = CAAnimationGroup()
-        rippleGroup.animations = [rippleScale, rippleFade]
-        rippleGroup.duration = 0.38
-        rippleGroup.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        rippleLayer.add(rippleGroup, forKey: "ripple")
+        let group             = CAAnimationGroup()
+        group.animations      = [expandScale, fade]
+        group.duration        = 0.40 / max(animationSpeed, 0.01)
+        group.timingFunction  = CAMediaTimingFunction(name: .easeOut)
+        rippleLayer.add(group, forKey: "ripple")
     }
 
     func animateMouseUp() {
-        let fromScale = cursorLayer.presentation()?.value(forKeyPath: "transform.scale") as? CGFloat ?? 0.6
+        guard showClickSwell else { return }
+
+        let fromScale = cursorLayer.presentation()?
+            .value(forKeyPath: "transform.scale") as? CGFloat ?? 0.6
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         cursorLayer.setValue(1.0, forKeyPath: "transform.scale")
         CATransaction.commit()
 
-        let spring = CASpringAnimation(keyPath: "transform.scale")
-        spring.fromValue = fromScale
-        spring.toValue = 1.0
-        spring.mass = 1.0
-        spring.stiffness = 280
-        spring.damping = 18
+        let spring             = CASpringAnimation(keyPath: "transform.scale")
+        spring.fromValue       = fromScale
+        spring.toValue         = 1.0
+        spring.mass            = 1.0
+        spring.stiffness       = 280 * max(animationSpeed, 0.01)
+        spring.damping         = 18
         spring.initialVelocity = 0
-        spring.duration = spring.settlingDuration
+        spring.duration        = spring.settlingDuration
         cursorLayer.add(spring, forKey: "springBack")
     }
 
     // MARK: - Positioning
 
-    /// Move the view so its center sits at `windowPoint` (in window coordinates).
-    /// Wrapped in a disabled-actions CATransaction so movement is instant — no lag.
-    func moveCenter(to windowPoint: CGPoint) {
+    func moveHotspot(to windowPoint: CGPoint) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         frame.origin = CGPoint(
-            x: windowPoint.x - frame.width / 2,
-            y: windowPoint.y - frame.height / 2
+            x: windowPoint.x - tipPadding,
+            y: windowPoint.y - (frame.height - tipPadding)
         )
         CATransaction.commit()
     }
