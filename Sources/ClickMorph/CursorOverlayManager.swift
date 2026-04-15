@@ -126,6 +126,18 @@ final class CursorOverlayManager: NSObject {
             self.cursorView.animateMouseUp()
             if self.isEnabled { self.transparentCursor.set() }
         }
+        monitor.onMiddleDown = { [weak self] point in
+            guard let self else { return }
+            self.updateCursorPosition(point)
+            self.cursorView.animateMouseDown()
+            if self.isEnabled { self.transparentCursor.set() }
+        }
+        monitor.onMiddleUp = { [weak self] point in
+            guard let self else { return }
+            self.updateCursorPosition(point)
+            self.cursorView.animateMouseUp()
+            if self.isEnabled { self.transparentCursor.set() }
+        }
     }
 
     // MARK: - Window management

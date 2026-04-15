@@ -17,6 +17,8 @@ final class MouseEventMonitor {
     var onMouseUp:    ((CGPoint) -> Void)?
     var onRightDown:  ((CGPoint) -> Void)?
     var onRightUp:    ((CGPoint) -> Void)?
+    var onMiddleDown: ((CGPoint) -> Void)?
+    var onMiddleUp:   ((CGPoint) -> Void)?
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -49,7 +51,10 @@ final class MouseEventMonitor {
             (1 << CGEventType.leftMouseDragged.rawValue)  |
             (1 << CGEventType.rightMouseDown.rawValue)    |
             (1 << CGEventType.rightMouseUp.rawValue)      |
-            (1 << CGEventType.rightMouseDragged.rawValue)
+            (1 << CGEventType.rightMouseDragged.rawValue) |
+            (1 << CGEventType.otherMouseDown.rawValue)    |
+            (1 << CGEventType.otherMouseUp.rawValue)      |
+            (1 << CGEventType.otherMouseDragged.rawValue)
 
         // Pass `self` as the userInfo pointer. Use passUnretained — the
         // CursorOverlayManager owns both the monitor and the tap lifetime,
@@ -117,7 +122,7 @@ final class MouseEventMonitor {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             switch type {
-            case .mouseMoved, .leftMouseDragged, .rightMouseDragged:
+            case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
                 self.onMouseMove?(location)
             case .leftMouseDown:
                 self.onMouseDown?(location)
@@ -127,6 +132,10 @@ final class MouseEventMonitor {
                 self.onRightDown?(location)
             case .rightMouseUp:
                 self.onRightUp?(location)
+            case .otherMouseDown:
+                self.onMiddleDown?(location)
+            case .otherMouseUp:
+                self.onMiddleUp?(location)
             default:
                 break
             }
