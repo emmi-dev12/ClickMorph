@@ -44,17 +44,20 @@ final class MouseEventMonitor {
     // MARK: - CGEventTap install / remove
 
     private func installTap() {
-        let eventsOfInterest: CGEventMask =
+        // Split into two lines so the Swift type-checker doesn't time out.
+        let mouseMask: CGEventMask =
             (1 << CGEventType.mouseMoved.rawValue)        |
             (1 << CGEventType.leftMouseDown.rawValue)     |
             (1 << CGEventType.leftMouseUp.rawValue)       |
             (1 << CGEventType.leftMouseDragged.rawValue)  |
             (1 << CGEventType.rightMouseDown.rawValue)    |
             (1 << CGEventType.rightMouseUp.rawValue)      |
-            (1 << CGEventType.rightMouseDragged.rawValue) |
+            (1 << CGEventType.rightMouseDragged.rawValue)
+        let otherMask: CGEventMask =
             (1 << CGEventType.otherMouseDown.rawValue)    |
             (1 << CGEventType.otherMouseUp.rawValue)      |
             (1 << CGEventType.otherMouseDragged.rawValue)
+        let eventsOfInterest: CGEventMask = mouseMask | otherMask
 
         // Pass `self` as the userInfo pointer. Use passUnretained — the
         // CursorOverlayManager owns both the monitor and the tap lifetime,
