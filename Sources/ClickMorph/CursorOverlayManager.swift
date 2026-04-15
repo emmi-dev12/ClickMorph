@@ -266,7 +266,7 @@ final class CursorOverlayManager: NSObject {
 
     private func startReHideTimer() {
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + 0.5, repeating: 2.0)
+        timer.schedule(deadline: .now() + 0.5, repeating: 5.0)
         timer.setEventHandler { [weak self] in
             self?.reapplyCursorHide()
             self?.transparentCursor.set()

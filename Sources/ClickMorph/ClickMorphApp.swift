@@ -20,26 +20,58 @@ struct ClickMorphApp: App {
 
 final class AppState: ObservableObject {
     @Published var isEnabled: Bool = true
-    @Published var selectedSize: CursorSize = .medium {
-        didSet { manager.setCursorScale(selectedSize.scale) }
+
+    // All three settings are persisted to UserDefaults so they survive relaunches.
+    // didSet is NOT called during init(), so manager.set* must be called explicitly
+    // in init() after restoring the saved values.
+
+    @Published var selectedSize: CursorSize {
+        didSet {
+            UserDefaults.standard.set(selectedSize.rawValue, forKey: Keys.size)
+            manager.setCursorScale(selectedSize.scale)
+        }
     }
-    @Published var showRipple: Bool = true {
-        didSet { manager.setRippleEnabled(showRipple) }
+    @Published var showRipple: Bool {
+        didSet {
+            UserDefaults.standard.set(showRipple, forKey: Keys.ripple)
+            manager.setRippleEnabled(showRipple)
+        }
     }
-    @Published var showClickSwell: Bool = true {
-        didSet { manager.setClickSwellEnabled(showClickSwell) }
+    @Published var showClickSwell: Bool {
+        didSet {
+            UserDefaults.standard.set(showClickSwell, forKey: Keys.swell)
+            manager.setClickSwellEnabled(showClickSwell)
+        }
     }
 
     let manager = CursorOverlayManager()
 
     init() {
+        let ud = UserDefaults.standard
+        // Register factory defaults — only applied when the key has never been set.
+        ud.register(defaults: [Keys.ripple: true, Keys.swell: true,
+                                Keys.size: CursorSize.medium.rawValue])
+
+        selectedSize   = CursorSize(rawValue: ud.string(forKey: Keys.size) ?? "") ?? .medium
+        showRipple     = ud.bool(forKey: Keys.ripple)
+        showClickSwell = ud.bool(forKey: Keys.swell)
+
         manager.start()
+        // Apply restored values — didSet doesn't fire during init.
         manager.setCursorScale(selectedSize.scale)
+        manager.setRippleEnabled(showRipple)
+        manager.setClickSwellEnabled(showClickSwell)
     }
 
     func toggle() {
         isEnabled.toggle()
         isEnabled ? manager.enable() : manager.disable()
+    }
+
+    private enum Keys {
+        static let size   = "clickmorph.size"
+        static let ripple = "clickmorph.ripple"
+        static let swell  = "clickmorph.swell"
     }
 }
 
