@@ -54,6 +54,7 @@ final class CursorView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.masksToBounds = false
+        isAccessibilityElement = false
         setupStaticLayers()
         rebuildLayers()
     }

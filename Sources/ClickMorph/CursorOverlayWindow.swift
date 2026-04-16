@@ -36,6 +36,12 @@ final class CursorOverlayWindow: NSWindow {
         isExcludedFromWindowsMenu = true
         hidesOnDeactivate = false
 
+        // Hide from the accessibility hierarchy so AX clients (automation tools,
+        // remote-access apps, screen readers) see through this window to the real
+        // UI underneath — the same way ignoresMouseEvents passes through hardware
+        // events, isAccessibilityElement = false passes through AX hit-tests.
+        isAccessibilityElement = false
+
         // Allow screen recording apps to capture this window so the animated
         // cursor is visible in recordings (replaces tools like Focusee).
         // .readOnly lets recorders read the pixels; they cannot write to it.
@@ -54,4 +60,9 @@ final class CursorOverlayWindow: NSWindow {
     // regardless of how the system tries to assign it.
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    // Return nil so the AX system finds no element here and falls through
+    // to the window stack below — mirrors the ignoresMouseEvents pass-through
+    // but for the accessibility layer.
+    override func accessibilityHitTest(_ point: NSPoint) -> Any? { nil }
 }

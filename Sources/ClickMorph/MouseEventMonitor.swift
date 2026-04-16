@@ -24,6 +24,11 @@ final class MouseEventMonitor {
     private var runLoopSource: CFRunLoopSource?
     private var permissionTimer: DispatchSourceTimer?
 
+    // Coalescing state for mouse-move events. Both fields are touched only on
+    // the main thread (the tap runs on CFRunLoopGetMain), so no lock is needed.
+    private var pendingMove = false
+    private var pendingMoveLocation = CGPoint.zero
+
     // MARK: - Start / Stop
 
     func start() {
@@ -121,27 +126,34 @@ final class MouseEventMonitor {
 
         let location = event.location  // CGPoint in global CG coords (origin = top-left of primary screen, Y down)
 
-        // Dispatch to main thread — never do heavy work inside the tap callback
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            switch type {
-            case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
-                self.onMouseMove?(location)
-            case .leftMouseDown:
-                self.onMouseDown?(location)
-            case .leftMouseUp:
-                self.onMouseUp?(location)
-            case .rightMouseDown:
-                self.onRightDown?(location)
-            case .rightMouseUp:
-                self.onRightUp?(location)
-            case .otherMouseDown:
-                self.onMiddleDown?(location)
-            case .otherMouseUp:
-                self.onMiddleUp?(location)
-            default:
-                break
+        switch type {
+        case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+            // Coalesce rapid move events: store the latest position and schedule
+            // exactly one async delivery per run-loop turn. On pages with heavy
+            // effects the main thread is already under load; N events → 1 update
+            // keeps the overlay from making that worse.
+            pendingMoveLocation = location
+            guard !pendingMove else { return }
+            pendingMove = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.pendingMove = false
+                self.onMouseMove?(self.pendingMoveLocation)
             }
+        case .leftMouseDown:
+            DispatchQueue.main.async { [weak self] in self?.onMouseDown?(location) }
+        case .leftMouseUp:
+            DispatchQueue.main.async { [weak self] in self?.onMouseUp?(location) }
+        case .rightMouseDown:
+            DispatchQueue.main.async { [weak self] in self?.onRightDown?(location) }
+        case .rightMouseUp:
+            DispatchQueue.main.async { [weak self] in self?.onRightUp?(location) }
+        case .otherMouseDown:
+            DispatchQueue.main.async { [weak self] in self?.onMiddleDown?(location) }
+        case .otherMouseUp:
+            DispatchQueue.main.async { [weak self] in self?.onMiddleUp?(location) }
+        default:
+            break
         }
     }
 
