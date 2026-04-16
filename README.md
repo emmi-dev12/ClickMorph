@@ -82,6 +82,8 @@ Click the cursor icon in the menu bar to access settings. All settings are saved
 | Click Ripple | Expanding ring on mouse-down |
 | Animation Speed | Slider from 0.25× (slow) to 2.0× (fast) |
 | Launch at Login | Start ClickMorph automatically when you log in |
+| Auto-Update | Silently download and install new releases on launch (off by default) |
+| Check for Updates… | Manually check for a newer version right now |
 | Quit | Quit ClickMorph (`Q`) |
 
 ---
@@ -95,6 +97,57 @@ The system cursor is hidden using `CGDisplayHideCursor` plus a 1×1 transparent 
 Cursor shape changes (arrow → i-beam → pointer, etc.) are detected by snapshotting `NSCursor.currentSystem` on every mouse-move event, before the transparent cursor override is applied.
 
 The overlay window uses `sharingType = .readOnly` so it appears in screen recordings captured by tools like QuickTime, Zoom, and Focusee.
+
+The overlay is hidden from the macOS accessibility hierarchy (`isAccessibilityElement = false`, `accessibilityHitTest` returns `nil`), so automation tools, screen readers, and remote-access apps can interact with the real UI beneath it without interference.
+
+---
+
+## Privacy & network activity
+
+**ClickMorph has no telemetry, no analytics, and no crash reporting.** The only time it makes an outbound connection is for the optional update check.
+
+### What gets sent
+
+| Request | Triggered by | Destination | Contents |
+|---|---|---|---|
+| Version check | Launch with Auto-Update on, or clicking "Check for Updates…" | `api.github.com` | Nothing — a plain `GET` with no parameters or identifiers |
+| DMG download | A newer version is found **and** you click "Install Now" | `github.com` | Nothing — a plain `GET` for the release asset |
+
+Both connections are standard HTTPS GETs. There are no query parameters, no request body, and no user-specific identifiers of any kind.
+
+The only information GitHub's servers receive is what every HTTPS request sends: your IP address and a `User-Agent` header. ClickMorph sets that header explicitly to `ClickMorph/<version> update-check` — you can see this in any packet capture.
+
+Auto-Update is **off by default**. No connection is ever made unless you enable it or click "Check for Updates…".
+
+### Accessibility permission
+
+The Accessibility permission grants ClickMorph a **listen-only** `CGEventTap`. Listen-only is a macOS-enforced mode: the tap can observe cursor position and button state but cannot synthesise, forward, or modify events. No input data leaves the machine.
+
+### Verify it yourself
+
+**1. Read the source.**
+The complete update logic is in [`Sources/ClickMorph/UpdateChecker.swift`](Sources/ClickMorph/UpdateChecker.swift), function `fetchLatestRelease()`. The entire outbound request is:
+
+```swift
+var req = URLRequest(url: URL(string: "https://api.github.com/repos/emmi-dev12/clickmorph/releases/latest")!,
+                     timeoutInterval: 15)
+req.setValue("application/vnd.github+json",        forHTTPHeaderField: "Accept")
+req.setValue("ClickMorph/<version> update-check",  forHTTPHeaderField: "User-Agent")
+// then: URLSession.shared.data(for: req)
+// No body. No query params. No other headers.
+```
+
+**2. Watch live connections with `nettop`.**
+`nettop` is a macOS built-in that shows real-time network activity per process. Run it while ClickMorph is open:
+
+```bash
+nettop -p $(pgrep -x ClickMorph)
+```
+
+With Auto-Update enabled, you will see one brief connection to `api.github.com:443` within the first few seconds after launch, and nothing else — ever. With Auto-Update off, the list stays empty until you manually click "Check for Updates…".
+
+**3. Inspect HTTPS traffic with a proxy.**
+[Proxyman](https://proxyman.io) (free tier) or [Charles Proxy](https://www.charlesproxy.com) act as a local HTTPS proxy and display every request an app makes, including full headers and body. After trusting the proxy certificate, you will see exactly one request to `api.github.com/repos/emmi-dev12/clickmorph/releases/latest` with an empty body and the User-Agent above. Nothing else.
 
 ---
 

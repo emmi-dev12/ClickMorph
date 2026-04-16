@@ -63,8 +63,12 @@ final class UpdateChecker {
     }
 
     private func fetchLatestRelease() async -> Result {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
         var req = URLRequest(url: releasesAPI, timeoutInterval: 15)
-        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("application/vnd.github+json",        forHTTPHeaderField: "Accept")
+        // Explicit User-Agent so the request is immediately identifiable in any
+        // packet capture — no ambiguity about what this connection is doing.
+        req.setValue("ClickMorph/\(version) update-check", forHTTPHeaderField: "User-Agent")
 
         guard let (data, resp) = try? await URLSession.shared.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200,
