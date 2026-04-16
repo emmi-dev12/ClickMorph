@@ -70,6 +70,9 @@ final class AppState: ObservableObject {
             }
         }
     }
+    @Published var autoUpdate: Bool {
+        didSet { UserDefaults.standard.set(autoUpdate, forKey: Keys.autoUpdate) }
+    }
 
     let manager = CursorOverlayManager()
 
@@ -77,10 +80,11 @@ final class AppState: ObservableObject {
         let ud = UserDefaults.standard
         // Register factory defaults — only applied when the key has never been set.
         ud.register(defaults: [
-            Keys.ripple: true,
-            Keys.swell:  true,
-            Keys.size:   CursorSize.medium.rawValue,
-            Keys.speed:  1.0
+            Keys.ripple:     true,
+            Keys.swell:      true,
+            Keys.size:       CursorSize.medium.rawValue,
+            Keys.speed:      1.0,
+            Keys.autoUpdate: false
         ])
 
         selectedSize   = CursorSize(rawValue: ud.string(forKey: Keys.size) ?? "") ?? .medium
@@ -95,6 +99,7 @@ final class AppState: ObservableObject {
         }
 
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        autoUpdate    = ud.bool(forKey: Keys.autoUpdate)
 
         manager.start()
         // Apply restored values — didSet doesn't fire during init.
@@ -103,6 +108,15 @@ final class AppState: ObservableObject {
         manager.setClickSwellEnabled(showClickSwell)
         manager.setTintColor(selectedTint?.color)
         manager.setAnimationSpeed(animationSpeed)
+
+        // Background update check — waits 3 s so the app is fully initialised
+        // before hitting the network. Completely silent if already up to date.
+        if autoUpdate {
+            Task {
+                try? await Task.sleep(for: .seconds(3))
+                await UpdateChecker().check(autoInstall: true)
+            }
+        }
     }
 
     func toggle() {
@@ -111,11 +125,12 @@ final class AppState: ObservableObject {
     }
 
     private enum Keys {
-        static let size   = "clickmorph.size"
-        static let ripple = "clickmorph.ripple"
-        static let swell  = "clickmorph.swell"
-        static let tint   = "clickmorph.tint"
-        static let speed  = "clickmorph.speed"
+        static let size       = "clickmorph.size"
+        static let ripple     = "clickmorph.ripple"
+        static let swell      = "clickmorph.swell"
+        static let tint       = "clickmorph.tint"
+        static let speed      = "clickmorph.speed"
+        static let autoUpdate = "clickmorph.autoUpdate"
     }
 }
 
@@ -234,6 +249,13 @@ struct MenuBarContentView: View {
         Divider()
 
         Toggle("Launch at Login", isOn: $appState.launchAtLogin)
+        Toggle("Auto-Update", isOn: $appState.autoUpdate)
+
+        Divider()
+
+        Button("Check for Updates…") {
+            Task { await UpdateChecker().checkManually() }
+        }
 
         Divider()
 
