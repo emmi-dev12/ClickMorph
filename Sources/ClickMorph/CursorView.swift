@@ -1,6 +1,14 @@
 import AppKit
 import QuartzCore
 
+/// Represents the custom cursor shape type
+enum CustomCursorShape {
+    case system
+    case dot
+    case triangle
+    case custom(imagePath: String)
+}
+
 /// Renders the system cursor image at a configurable scale, with a
 /// click-shrink + spring-back animation and an optional outward ripple ring.
 ///
@@ -29,6 +37,11 @@ final class CursorView: NSView {
 
     /// Animation speed multiplier. 1.0 = default. Higher = faster.
     var animationSpeed: Double = 1.0
+
+    /// Custom shape type and optional image path
+    var customShape: CustomCursorShape = .system {
+        didSet { rebuildLayers() }
+    }
 
     /// Replace the displayed cursor shape (arrow → i-beam → pointer, etc.).
     func updateCursor(_ cursor: NSCursor) {
@@ -65,13 +78,29 @@ final class CursorView: NSView {
     private var systemCursor: NSCursor { currentCursor }
 
     private var scaledSize: CGSize {
-        let s = systemCursor.image.size
-        return CGSize(width: s.width * displayScale, height: s.height * displayScale)
+        // For custom shapes, use a standard size scaled by displayScale;
+        // for system cursor, scale the image size
+        let baseSize: CGSize
+        switch customShape {
+        case .system:
+            let s = systemCursor.image.size
+            baseSize = CGSize(width: s.width * displayScale, height: s.height * displayScale)
+        case .dot, .triangle, .custom:
+            baseSize = CGSize(width: 16 * displayScale, height: 16 * displayScale)
+        }
+        return baseSize
     }
 
     private var scaledHotSpot: CGPoint {
-        let h = systemCursor.hotSpot
-        return CGPoint(x: h.x * displayScale, y: h.y * displayScale)
+        // For custom shapes, center the hotspot; for system cursor, use the actual hotspot
+        switch customShape {
+        case .system:
+            let h = systemCursor.hotSpot
+            return CGPoint(x: h.x * displayScale, y: h.y * displayScale)
+        case .dot, .triangle, .custom:
+            let ss = scaledSize
+            return CGPoint(x: ss.width / 2, y: ss.height / 2)
+        }
     }
 
     /// Runs once from init(). Sets fixed layer properties and inserts both
@@ -126,7 +155,7 @@ final class CursorView: NSView {
         cursorLayer.anchorPoint = CGPoint(x: anchorX, y: anchorY)
         cursorLayer.position    = hotInView
 
-        cursorLayer.contents      = tintedCursorImage(size: ss)
+        cursorLayer.contents      = cursorImage(size: ss)
         cursorLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
 
         let rippleD: CGFloat = max(ss.width, ss.height) * 0.65
@@ -137,7 +166,142 @@ final class CursorView: NSView {
         CATransaction.commit()
     }
 
-    // MARK: - Tint rendering
+    // MARK: - Cursor image rendering
+
+    /// Returns the appropriate cursor image based on the current shape setting
+    private func cursorImage(size: CGSize) -> CGImage? {
+        switch customShape {
+        case .system:
+            return tintedCursorImage(size: size)
+        case .dot:
+            return renderDotCursor(size: size)
+        case .triangle:
+            return renderTriangleCursor(size: size)
+        case .custom(let imagePath):
+            return loadCustomCursorImage(from: imagePath, size: size)
+        }
+    }
+
+    /// Renders a simple dot cursor
+    private func renderDotCursor(size: CGSize) -> CGImage? {
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        let px = Int(size.width * scale)
+        let py = Int(size.height * scale)
+        guard px > 0, py > 0 else { return nil }
+
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: px, height: py,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: cs,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        ctx.scaleBy(x: scale, y: scale)
+
+        let dotRadius = min(size.width, size.height) * 0.25
+        let dotRect = CGRect(x: size.width / 2 - dotRadius, y: size.height / 2 - dotRadius,
+                             width: dotRadius * 2, height: dotRadius * 2)
+
+        ctx.setFillColor(NSColor.white.cgColor)
+        ctx.fillEllipse(in: dotRect)
+
+        if let tint = tintColor {
+            ctx.setBlendMode(.multiply)
+            ctx.setFillColor(tint.cgColor)
+            ctx.fillEllipse(in: dotRect)
+            ctx.setBlendMode(.destinationIn)
+            ctx.fillEllipse(in: dotRect)
+        }
+
+        return ctx.makeImage()
+    }
+
+    /// Renders a triangle cursor
+    private func renderTriangleCursor(size: CGSize) -> CGImage? {
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        let px = Int(size.width * scale)
+        let py = Int(size.height * scale)
+        guard px > 0, py > 0 else { return nil }
+
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: px, height: py,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: cs,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        ctx.scaleBy(x: scale, y: scale)
+
+        let centerX = size.width / 2
+        let centerY = size.height / 2
+        let triangleSize = min(size.width, size.height) * 0.3
+
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: centerX, y: centerY - triangleSize))
+        path.line(to: NSPoint(x: centerX + triangleSize, y: centerY + triangleSize))
+        path.line(to: NSPoint(x: centerX - triangleSize, y: centerY + triangleSize))
+        path.close()
+
+        ctx.setFillColor(NSColor.white.cgColor)
+        ctx.addPath(path.cgPath)
+        ctx.fillPath()
+
+        if let tint = tintColor {
+            ctx.addPath(path.cgPath)
+            ctx.setBlendMode(.multiply)
+            ctx.setFillColor(tint.cgColor)
+            ctx.fillPath()
+            ctx.addPath(path.cgPath)
+            ctx.setBlendMode(.destinationIn)
+            ctx.fillPath()
+        }
+
+        return ctx.makeImage()
+    }
+
+    /// Loads and scales a custom image as cursor
+    private func loadCustomCursorImage(from path: String, size: CGSize) -> CGImage? {
+        guard let image = NSImage(contentsOfFile: path) else { return nil }
+
+        let targetSize = size
+        var proposedRect = CGRect(origin: .zero, size: targetSize)
+        guard let cgImage = image.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil)
+        else { return nil }
+
+        if let tint = tintColor {
+            return applyTintToImage(cgImage, size: targetSize, tintColor: tint)
+        }
+        return cgImage
+    }
+
+    /// Applies tint color to a CGImage
+    private func applyTintToImage(_ baseImage: CGImage, size: CGSize, tintColor: NSColor) -> CGImage? {
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        let px = Int(size.width * scale)
+        let py = Int(size.height * scale)
+        guard px > 0, py > 0 else { return baseImage }
+
+        let cs = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: px, height: py,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: cs,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return baseImage }
+
+        ctx.scaleBy(x: scale, y: scale)
+
+        ctx.draw(baseImage, in: CGRect(origin: .zero, size: size))
+        ctx.setBlendMode(.multiply)
+        ctx.setFillColor(tintColor.cgColor)
+        ctx.fill(CGRect(origin: .zero, size: size))
+        ctx.setBlendMode(.destinationIn)
+        ctx.draw(baseImage, in: CGRect(origin: .zero, size: size))
+
+        return ctx.makeImage()
+    }
 
     /// Renders the cursor image, optionally blending tintColor on top using
     /// multiply compositing so the cursor silhouette is preserved.
@@ -148,34 +312,7 @@ final class CursorView: NSView {
         else { return nil }
         guard let tint = tintColor else { return base }
 
-        let scale = NSScreen.main?.backingScaleFactor ?? 2
-        let px    = Int(size.width * scale)
-        let py    = Int(size.height * scale)
-        guard px > 0, py > 0 else { return base }
-
-        let cs  = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(
-            data: nil, width: px, height: py,
-            bitsPerComponent: 8, bytesPerRow: 0,
-            space: cs,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return base }
-
-        ctx.scaleBy(x: scale, y: scale)
-
-        // Draw original cursor
-        ctx.draw(base, in: CGRect(origin: .zero, size: size))
-
-        // Multiply the tint — preserves alpha, darkens toward tint hue
-        ctx.setBlendMode(.multiply)
-        ctx.setFillColor(tint.cgColor)
-        ctx.fill(CGRect(origin: .zero, size: size))
-
-        // Restore alpha that multiply blend may have clipped on transparent pixels
-        ctx.setBlendMode(.destinationIn)
-        ctx.draw(base, in: CGRect(origin: .zero, size: size))
-
-        return ctx.makeImage()
+        return applyTintToImage(base, size: size, tintColor: tint)
     }
 
     // MARK: - Animations

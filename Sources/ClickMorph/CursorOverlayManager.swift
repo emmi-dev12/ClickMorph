@@ -95,6 +95,25 @@ final class CursorOverlayManager: NSObject {
         cursorView.animationSpeed = speed
     }
 
+    func setCustomShape(_ shape: CursorShape, customImagePath: String?) {
+        let customShape: CustomCursorShape
+        switch shape {
+        case .system:
+            customShape = .system
+        case .dot:
+            customShape = .dot
+        case .triangle:
+            customShape = .triangle
+        case .custom:
+            if let path = customImagePath {
+                customShape = .custom(imagePath: path)
+            } else {
+                customShape = .system
+            }
+        }
+        cursorView.customShape = customShape
+    }
+
     // MARK: - Monitor wiring
 
     private func wireMonitor() {
