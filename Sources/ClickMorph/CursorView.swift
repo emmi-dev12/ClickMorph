@@ -238,22 +238,30 @@ final class CursorView: NSView {
         let centerY = size.height / 2
         let triangleSize = min(size.width, size.height) * 0.3
 
-        let path = NSBezierPath()
-        path.move(to: NSPoint(x: centerX, y: centerY - triangleSize))
-        path.line(to: NSPoint(x: centerX + triangleSize, y: centerY + triangleSize))
-        path.line(to: NSPoint(x: centerX - triangleSize, y: centerY + triangleSize))
-        path.close()
+        ctx.beginPath()
+        ctx.move(to: CGPoint(x: centerX, y: centerY - triangleSize))
+        ctx.addLine(to: CGPoint(x: centerX + triangleSize, y: centerY + triangleSize))
+        ctx.addLine(to: CGPoint(x: centerX - triangleSize, y: centerY + triangleSize))
+        ctx.closePath()
 
         ctx.setFillColor(NSColor.white.cgColor)
-        ctx.addPath(path.cgPath)
         ctx.fillPath()
 
         if let tint = tintColor {
-            ctx.addPath(path.cgPath)
+            ctx.beginPath()
+            ctx.move(to: CGPoint(x: centerX, y: centerY - triangleSize))
+            ctx.addLine(to: CGPoint(x: centerX + triangleSize, y: centerY + triangleSize))
+            ctx.addLine(to: CGPoint(x: centerX - triangleSize, y: centerY + triangleSize))
+            ctx.closePath()
             ctx.setBlendMode(.multiply)
             ctx.setFillColor(tint.cgColor)
             ctx.fillPath()
-            ctx.addPath(path.cgPath)
+
+            ctx.beginPath()
+            ctx.move(to: CGPoint(x: centerX, y: centerY - triangleSize))
+            ctx.addLine(to: CGPoint(x: centerX + triangleSize, y: centerY + triangleSize))
+            ctx.addLine(to: CGPoint(x: centerX - triangleSize, y: centerY + triangleSize))
+            ctx.closePath()
             ctx.setBlendMode(.destinationIn)
             ctx.fillPath()
         }
