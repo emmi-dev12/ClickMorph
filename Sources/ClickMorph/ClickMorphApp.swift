@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ServiceManagement
+import UniformTypeIdentifiers
 
 // MARK: - Entry point
 
@@ -50,6 +51,20 @@ final class AppState: ObservableObject {
             manager.setTintColor(selectedTint?.color)
         }
     }
+    @Published var selectedShape: CursorShape {
+        didSet {
+            UserDefaults.standard.set(selectedShape.rawValue, forKey: Keys.shape)
+            manager.setCustomShape(selectedShape, customImagePath: customImagePath)
+        }
+    }
+    @Published var customImagePath: String? {
+        didSet {
+            UserDefaults.standard.set(customImagePath, forKey: Keys.customImage)
+            if selectedShape == .custom {
+                manager.setCustomShape(selectedShape, customImagePath: customImagePath)
+            }
+        }
+    }
     @Published var animationSpeed: Double {
         didSet {
             UserDefaults.standard.set(animationSpeed, forKey: Keys.speed)
@@ -80,13 +95,16 @@ final class AppState: ObservableObject {
             Keys.ripple: true,
             Keys.swell:  true,
             Keys.size:   CursorSize.medium.rawValue,
-            Keys.speed:  1.0
+            Keys.speed:  1.0,
+            Keys.shape:  CursorShape.system.rawValue
         ])
 
         selectedSize   = CursorSize(rawValue: ud.string(forKey: Keys.size) ?? "") ?? .medium
         showRipple     = ud.bool(forKey: Keys.ripple)
         showClickSwell = ud.bool(forKey: Keys.swell)
         animationSpeed = ud.double(forKey: Keys.speed)
+        selectedShape  = CursorShape(rawValue: ud.string(forKey: Keys.shape) ?? "") ?? .system
+        customImagePath = ud.string(forKey: Keys.customImage)
 
         if let tintRaw = ud.string(forKey: Keys.tint) {
             selectedTint = CursorTint(rawValue: tintRaw)
@@ -102,6 +120,7 @@ final class AppState: ObservableObject {
         manager.setRippleEnabled(showRipple)
         manager.setClickSwellEnabled(showClickSwell)
         manager.setTintColor(selectedTint?.color)
+        manager.setCustomShape(selectedShape, customImagePath: customImagePath)
         manager.setAnimationSpeed(animationSpeed)
     }
 
@@ -111,11 +130,13 @@ final class AppState: ObservableObject {
     }
 
     private enum Keys {
-        static let size   = "clickmorph.size"
-        static let ripple = "clickmorph.ripple"
-        static let swell  = "clickmorph.swell"
-        static let tint   = "clickmorph.tint"
-        static let speed  = "clickmorph.speed"
+        static let size        = "clickmorph.size"
+        static let ripple      = "clickmorph.ripple"
+        static let swell       = "clickmorph.swell"
+        static let tint        = "clickmorph.tint"
+        static let speed       = "clickmorph.speed"
+        static let shape       = "clickmorph.shape"
+        static let customImage = "clickmorph.customImage"
     }
 }
 
@@ -140,6 +161,17 @@ enum CursorSize: String, CaseIterable, Identifiable {
         case .huge:   return 3.0
         }
     }
+}
+
+// MARK: - Cursor shape options
+
+enum CursorShape: String, CaseIterable, Identifiable {
+    case system   = "System"
+    case dot      = "Dot"
+    case triangle = "Triangle"
+    case custom   = "Custom Image"
+
+    var id: String { rawValue }
 }
 
 // MARK: - Cursor tint options
@@ -173,6 +205,18 @@ enum CursorTint: String, CaseIterable, Identifiable {
 struct MenuBarContentView: View {
     @EnvironmentObject var appState: AppState
 
+    private func selectCustomImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+
+        if panel.runModal() == .OK, let url = panel.url {
+            appState.customImagePath = url.path
+        }
+    }
+
     var body: some View {
         Button(appState.isEnabled ? "Disable ClickMorph" : "Enable ClickMorph") {
             appState.toggle()
@@ -180,6 +224,28 @@ struct MenuBarContentView: View {
         .keyboardShortcut("e", modifiers: [])
 
         Divider()
+
+        Menu("Cursor Shape") {
+            Picker("Shape", selection: $appState.selectedShape) {
+                ForEach(CursorShape.allCases) { shape in
+                    Text(shape.rawValue).tag(shape)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+
+            if appState.selectedShape == .custom {
+                Divider()
+                Button("Choose Image...") {
+                    selectCustomImage()
+                }
+                if let imagePath = appState.customImagePath {
+                    Text(URL(fileURLWithPath: imagePath).lastPathComponent)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
 
         Menu("Cursor Size") {
             Picker("Cursor Size", selection: $appState.selectedSize) {
